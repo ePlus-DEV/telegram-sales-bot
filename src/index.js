@@ -1,4 +1,5 @@
 import { constantTimeEqual, createOrderId, validPositiveInt, sepayPayment, vietQrUrl, orderPaymentMatches } from './domain.js';
+import { enqueueNotification, flushNotifications } from './notifications.js';
 
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -84,22 +85,43 @@ async function finishStars(env, message) {
   const order = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
   if (!order || !['PENDING','PAID','FULFILLED'].includes(order.status)) return;
   const charge = String(payment.telegram_payment_charge_id || '');
-  if (!charge || payment.currency !== 'XTR' || String(order.user_id) !== String(message.from.id) ||
+  if (!charge || payment.currency !== 'XTR' || String(order.user_id) !== String(message.from?.id) ||
       order.kind !== 'digital' || order.provider !== 'stars' || order.total_stars !== payment.total_amount) return;
-  const results = await env.DB.batch([
+  // The (provider, event_id) PK prevents a charge from being applied to any
+  // second order. Replayed successful_payment events resume unfinished delivery.
+  await env.DB.batch([
     env.DB.prepare('INSERT OR IGNORE INTO payment_events(provider,event_id,order_id) VALUES(?,?,?)').bind('stars',charge,id),
-    env.DB.prepare("UPDATE orders SET status='PAID',payment_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING' AND EXISTS(SELECT 1 FROM payment_events WHERE provider='stars' AND event_id=? AND order_id=?)").bind(charge,id,charge,id)
+    env.DB.prepare(
+      "UPDATE orders SET status='PAID',payment_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING' AND EXISTS(SELECT 1 FROM payment_events WHERE provider='stars' AND event_id=? AND order_id=?)"
+    ).bind(charge,id,charge,id)
   ]);
-  const isThisCharge = await env.DB.prepare('SELECT 1 FROM payment_events WHERE provider=? AND event_id=? AND order_id=?').bind('stars',charge,id).first();
-  if (!isThisCharge) return;
-  await env.DB.prepare('UPDATE digital_inventory SET delivered_order_id=?,reserved_order_id=NULL WHERE reserved_order_id=? AND delivered_order_id IS NULL').bind(id,id).run();
-  await env.DB.prepare("UPDATE orders SET status='FULFILLED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PAID' AND EXISTS(SELECT 1 FROM digital_inventory WHERE delivered_order_id=?)").bind(id,id).run();
-  const item = await env.DB.prepare('SELECT secret_value FROM digital_inventory WHERE delivered_order_id=?').bind(id).first();
-  if (item) await send(env, message.chat.id, '✅ Đã thanh toán và giao hàng.\nĐơn: ' + id + '\nMã/Tài khoản:\n' + item.secret_value + '\nXem lại: /mykey ' + id);
-  else {
-    await send(env, message.chat.id, '✅ Thanh toán thành công. Đơn ' + id + ' cần hỗ trợ giao hàng. Dùng /paysupport.');
-    if (adminId(env)) await send(env, adminId(env), '⚠️ Đơn Stars ' + id + ' đã trả tiền nhưng chưa giao được.');
+  const ownsCharge = await env.DB.prepare('SELECT 1 FROM payment_events WHERE provider=? AND event_id=? AND order_id=?')
+    .bind('stars',charge,id).first();
+  if (!ownsCharge) return;
+  let current = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
+  if (current.status === 'PAID') {
+    // Both changes are atomic: a key cannot be marked delivered twice, and an
+    // order is never fulfilled unless inventory is attached to that order.
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE digital_inventory SET delivered_order_id=?,reserved_order_id=NULL WHERE reserved_order_id=? AND delivered_order_id IS NULL AND EXISTS(SELECT 1 FROM orders WHERE id=? AND status='PAID')"
+      ).bind(id,id,id),
+      env.DB.prepare(
+        "UPDATE orders SET status='FULFILLED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PAID' AND EXISTS(SELECT 1 FROM digital_inventory WHERE delivered_order_id=?)"
+      ).bind(id,id)
+    ]);
+    current = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
   }
+  if (current.status === 'FULFILLED') {
+    await enqueueNotification(env,id,'stars_key',current.user_id);
+  } else if (current.status === 'PAID') {
+    // Never silently drop a captured Stars payment when inventory is missing.
+    await enqueueNotification(env,id,'stars_review_customer',current.user_id);
+    if (adminId(env)) await enqueueNotification(env,id,'stars_review_admin',adminId(env));
+  }
+  // Return 5xx on delivery failure; Telegram can retry the webhook and the
+  // outbox sends only unsent notifications. /retryalerts is the manual fallback.
+  await flushNotifications(env,send,{ orderId:id });
 }
 
 async function adminCommand(env, chatId, text) {
@@ -124,6 +146,15 @@ async function adminCommand(env, chatId, text) {
   }
   if (text === '/admin') return send(env, chatId, 'Quản trị:\n/addphysical Tên | VND | Mô tả\n/adddigital Tên | Stars | Mô tả\n/addkey ID | Key\n/adminorders\n/fulfill MÃ_ĐƠN');
   if (text === '/adminorders') return listOrders(env, chatId, null, true);
+  if (text === '/retryalerts') {
+    try {
+      const count = await flushNotifications(env,send,{limit:20});
+      return send(env,chatId,'✅ Đã gửi lại ' + count + ' thông báo đang chờ. Chạy lại để xử lý tiếp nếu cần.');
+    } catch (error) {
+      console.error('Admin notification recovery failed:',error.message);
+      return send(env,chatId,'⚠️ Gửi lại thông báo thất bại. Kiểm tra logs và thử /retryalerts sau.');
+    }
+  }
   if (text.startsWith('/fulfill ')) {
     const id = text.slice(9).trim();
     const order = await env.DB.prepare("SELECT * FROM orders WHERE id=? AND kind='physical' AND status='PAID'").bind(id).first();
@@ -174,27 +205,43 @@ async function telegramUpdate(env, update) {
   return send(env, chatId, 'Dùng /catalog để xem sản phẩm hoặc /help để được hỗ trợ.');
 }
 
-async function sepayWebhook(env, body, ctx) {
+async function sepayWebhook(env, body) {
   const tx = sepayPayment(body, env.BANK_ACCOUNT_NO);
   if (!tx) return json({ success: true, matched: false });
-  const order = await env.DB.prepare("SELECT * FROM orders WHERE id=? AND kind='physical' AND provider='sepay' AND status='PENDING' AND total_vnd=?").bind(tx.orderId,tx.amount).first();
+  // Query settled orders too: callbacks can be replayed after payment was
+  // persisted but notification delivery failed.
+  const order = await env.DB.prepare(
+    "SELECT * FROM orders WHERE id=? AND kind='physical' AND provider='sepay' AND total_vnd=?"
+  ).bind(tx.orderId,tx.amount).first();
   if (!order) return json({ success: true, matched: false });
-  const batch = await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO payment_events(provider,event_id,order_id) SELECT 'sepay',?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=? AND status='PENDING' AND total_vnd=?)")
-      .bind(tx.eventId,tx.orderId,tx.orderId,tx.amount),
-    env.DB.prepare("UPDATE orders SET status='PAID',payment_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING' AND provider='sepay' AND total_vnd=? AND EXISTS (SELECT 1 FROM payment_events WHERE provider='sepay' AND event_id=? AND order_id=?)")
-      .bind(tx.eventId,tx.orderId,tx.amount,tx.eventId,tx.orderId)
-  ]);
-  if (batch[1].meta.changes) {
-    ctx.waitUntil((async () => {
-      await send(env, order.user_id, '✅ Đã nhận ' + tx.amount.toLocaleString('vi-VN') + 'đ cho đơn ' + tx.orderId + '. Đơn đang chờ giao hàng.');
-      if (adminId(env)) await send(env,adminId(env),'📦 Đơn vật lý đã thanh toán: ' + tx.orderId + '\nDùng /fulfill ' + tx.orderId + ' sau khi giao.');
-    })().catch(err => console.error('Payment notification failed:', err.message)));
+  let newlyPaid = false;
+  if (order.status === 'PENDING') {
+    const results = await env.DB.batch([
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO payment_events(provider,event_id,order_id) SELECT 'sepay',?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=? AND status='PENDING' AND total_vnd=?)"
+      ).bind(tx.eventId,tx.orderId,tx.orderId,tx.amount),
+      env.DB.prepare(
+        "UPDATE orders SET status='PAID',payment_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING' AND provider='sepay' AND total_vnd=? AND EXISTS (SELECT 1 FROM payment_events WHERE provider='sepay' AND event_id=? AND order_id=?)"
+      ).bind(tx.eventId,tx.orderId,tx.amount,tx.eventId,tx.orderId)
+    ]);
+    newlyPaid = !!results[1].meta.changes;
   }
-  return json({ success: true, matched: !!batch[1].meta.changes });
+  const current = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(tx.orderId).first();
+  if (!['PAID','FULFILLED'].includes(current?.status) || current.payment_ref !== tx.eventId)
+    return json({ success:true, matched:false });
+  await enqueueNotification(env,tx.orderId,'physical_paid_customer',current.user_id);
+  if (adminId(env)) await enqueueNotification(env,tx.orderId,'physical_paid_admin',adminId(env));
+  await flushNotifications(env,send,{orderId:tx.orderId});
+  return json({ success: true, matched: newlyPaid });
 }
 
 export default {
+  async scheduled(_controller,env,ctx) {
+    ctx.waitUntil(flushNotifications(env,send,{limit:40}).catch(error => {
+      console.error('Scheduled payment notification retry failed:',error.message);
+      throw error;
+    }));
+  },
   async fetch(request, env, ctx) {
     const path = new URL(request.url).pathname;
     if (request.method === 'GET' && path === '/healthz') return json({ ok: true, service: 'telegram-sales-bot' });
@@ -214,7 +261,7 @@ export default {
     }
     if (path === '/sepay/webhook') {
       if (!env.SEPAY_WEBHOOK_API_KEY || !constantTimeEqual(request.headers.get('Authorization'),'Apikey ' + env.SEPAY_WEBHOOK_API_KEY)) return json({ error: 'unauthorized' },401);
-      try { return await sepayWebhook(env,await request.json(),ctx); }
+      try { return await sepayWebhook(env,await request.json()); }
       catch (err) { console.error('SePay webhook failed:',err.message); return json({ success: false },500); }
     }
     return json({ error:'not found' },404);
