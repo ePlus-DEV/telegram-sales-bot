@@ -16,12 +16,12 @@ export function validateStagingUrl(value) {
   return url.origin;
 }
 
-async function check(fetchImpl,base,path,{method='GET',headers={},body}={}){
+async function check(fetchImpl,base,path,{method='GET',headers={},body,allowRedirect=false}={}){
   const response=await fetchImpl(base+path,{
     method,headers:{'cache-control':'no-store',...headers},body,
     redirect:'manual',signal:AbortSignal.timeout(10000)
   });
-  if(response.status>=300&&response.status<400)
+  if(!allowRedirect&&response.status>=300&&response.status<400)
     throw new Error(path+': unexpected redirect (probe never follows redirects)');
   return response;
 }
@@ -75,7 +75,7 @@ export async function smokeStaging({baseUrl,fetchImpl=fetch,adminPassword}={}){
   if(adminPassword){
     const login=await check(fetchImpl,base,'/admin/login',{
       method:'POST',headers:{origin:base,'content-type':'application/x-www-form-urlencoded'},
-      body:new URLSearchParams({password:adminPassword}).toString()
+      body:new URLSearchParams({password:adminPassword}).toString(),allowRedirect:true
     });
     if(login.status!==303||login.headers.get('location')?.split('?')[0]!=='/admin')
       throw new Error('Admin staging login failed');
@@ -93,7 +93,7 @@ export async function smokeStaging({baseUrl,fetchImpl=fetch,adminPassword}={}){
     // Only session revocation; never touch product, payment or customer data.
     const logout=await check(fetchImpl,base,'/admin/logout',{
       method:'POST',headers:{origin:base,cookie,'content-type':'application/x-www-form-urlencoded'},
-      body:new URLSearchParams({csrf}).toString()
+      body:new URLSearchParams({csrf}).toString(),allowRedirect:true
     });
     if(logout.status!==303||logout.headers.get('location')!=='/admin')
       throw new Error('Admin staging logout failed');

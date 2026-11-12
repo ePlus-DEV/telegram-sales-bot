@@ -106,3 +106,29 @@ test('Turso read-only inspector accepts complete schemas and rejects missing tab
     }),/missing tables/
   );
 });
+
+test('authenticated smoke login uses staging-only cookie/CSRF and logs out without business writes',async()=>{
+  const paths=[];
+  const cookie='eplus_sales_admin='+'a'.repeat(64);
+  const csrf='b'.repeat(48);
+  const fakeFetch=async(url,init)=>{
+    const path=new URL(url).pathname;paths.push(path);
+    if(path==='/healthz')return Response.json({ok:true,service:'telegram-sales-bot'});
+    if(path==='/admin'&&!(init.headers?.cookie))
+      return new Response('<input name="password">',{status:200,headers:{'content-security-policy':"frame-ancestors 'none'"}});
+    if(path==='/telegram/webhook'||path==='/sepay/webhook')return Response.json({error:'unauthorized'},{status:401});
+    if(path==='/admin/products/create')return new Response('',{status:init.headers.origin==='https://attacker.invalid'?403:401});
+    if(path==='/admin/login')return new Response(null,{status:303,headers:{
+      location:'/admin?lang=en','set-cookie':cookie+'; HttpOnly; Secure; SameSite=Strict'
+    }});
+    if(path==='/admin')return new Response('<input type="hidden" name="csrf" value="'+csrf+'">',{status:200});
+    if(path==='/admin/logout')return new Response(null,{status:303,headers:{location:'/admin'}});
+    throw new Error('Unexpected route '+path);
+  };
+  const result=await smokeStaging({baseUrl:'https://staging.example.org',fetchImpl:fakeFetch,
+    adminPassword:'STAGING_EXAMPLE_PASSWORD_ONLY'});
+  assert.equal(result.checks.length,8);
+  assert.ok(result.checks.includes('Authenticated admin dashboard and database session'));
+  assert.ok(result.checks.includes('Admin session revocation'));
+  assert.equal(paths.at(-1),'/admin/logout');
+});
