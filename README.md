@@ -65,6 +65,23 @@ New admin commands: `/expireorders`, `/bankreviews`, `/ackbank TRANSACTION_ID`, 
 
 Current limitations: no live gateway test was performed; no automatic reconciliation of approved but abandoned Stars checkouts; no automatic bank refund; no Telegram refund status polling. Do not mark the product production-ready yet. Telegram reference: https://core.telegram.org/bots/api#refundstarpayment and https://core.telegram.org/bots/payments-stars. SePay reference: https://docs.sepay.vn/tich-hop-webhooks.html.
 
+## Web Admin Dashboard (issue #6)
+
+After migration `0005_web_admin.sql`, the owner can manage the store at **`https://YOUR_DEPLOYED_DOMAIN/admin`** on Cloudflare Workers, Vercel, Railway, Render, Koyeb or Docker.
+
+The dashboard includes:
+- **Overview:** active products, paid physical orders awaiting delivery, available digital keys and bank transfers to review.
+- **Products:** create/edit/disable physical and digital products, with enforced VND vs Telegram Stars pricing.
+- **Stock:** add one digital key at a time. The raw key is **never displayed back** on the dashboard, but remains stored in the database for delivery; protect database access.
+- **Orders:** view recent 50 orders and mark **PAID physical** orders as fulfilled, without changing payment records.
+- **Reconciliation:** list late/unmatched bank transfers, acknowledge review, and view pending Stars refund statuses without performing or repeating refunds from the web UI.
+
+**Mandatory setup:** configure a high-entropy `ADMIN_DASHBOARD_PASSWORD` (at least 16 characters, preferably generated 32+ chars) in your hosting **secret/environment settings**. Without it, `/admin` returns **503** and cannot be logged into. No default password or master bypass exists. The dashboard uses a hashed, server-stored 8-hour session, `Secure`/`HttpOnly`/`SameSite=Strict` cookie, CSRF tokens, origin checks, IP-based login throttling (with a global fallback), restrictive CSP and an audit table for mutations.
+
+**Before changing code in production:** run migrations for the target database (`npm run db:migrate` for Cloudflare D1 or `npm run db:migrate:turso` for Turso). Set a strong password **before exposing the dashboard**. `ADMIN_DASHBOARD_PASSWORD` is not the Telegram bot token and must never be included in GitHub commits, logs or public client-side JavaScript.
+
+**Safety boundaries:** Dashboard intentionally does not expose raw key inventory, export user credentials, or issue refunds. Physical shipping notification is not automatically sent from a dashboard action; inform customers separately. For high-volume shops use external identity/SSO and add further controls before production.
+
 ## What works
 
 | Feature | MVP |
@@ -77,7 +94,8 @@ Current limitations: no live gateway test was performed; no automatic reconcilia
 | Customer order history and re-fetch a delivered key | Yes |
 | Admin commands for products, keys, orders, and marking shipped physical orders complete | Yes |
 | Cloudflare D1 persistent storage | Yes |
-| Web admin, carts, multiple quantities, payOS, coupons, shipping rates, stock for physical products | Not implemented |
+| Web Admin (product CRUD, stock intake, physical order fulfillment and payment review) | Yes, password-protected |
+| Carts, multiple quantities, payOS, coupons, shipping rates, physical inventory | Not implemented |
 
 ### Important Telegram payment rules
 
@@ -213,7 +231,8 @@ For webhook testing you need an HTTPS endpoint reachable by Telegram/SePay; loca
 - [x] Unapproved order expiration, late SePay review and one-shot admin Stars refund request
 - [ ] Automatic reconciliation for approved-but-abandoned Stars checkout and full refund/customer dispute workflow
 - [ ] Shipping addresses, physical inventory, stock reservation, and fulfillment tracking
-- [ ] Admin dashboard protected with strong authentication, audit trail and rate limits
+- [x] Responsive Web Admin with server-side sessions, password auth, CSRF, throttling and audit trail
+- [ ] SSO/RBAC, mass inventory import and role-based approvals
 - [ ] payOS for **physical** goods; optional other compliant gateways
 - [ ] Backup/restore runbooks, monitoring, order export and operational alerting
 - [ ] Internationalization, cart, coupons and referral

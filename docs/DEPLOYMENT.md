@@ -137,3 +137,11 @@ For payments, server availability and post-payment notifications matter at least
 Cloudflare Workers will expire unapproved orders and retry payment notification every 5 minutes via `[triggers]` cron. On Vercel/Railway/Render/Koyeb/Docker this HTTP app does not include a scheduled daemon; admins must run `/expireorders` and `/retryalerts` or configure a trusted scheduled operator. Never turn an untrusted public endpoint into a maintenance trigger.
 
 To review late bank deposits use `/bankreviews`; `ackbank` is merely an acknowledgement of human reconciliation and **does not** refund money. To refund a Stars charge for a PAID, undelivered digital order use `/refundstars ORDER_ID`; if the result is `NEEDS_REVIEW`, inspect Telegram records before any manual action. Fulfilled orders cannot be refunded by this automated command.
+
+## Web Admin Dashboard
+
+After running migration `0005_web_admin.sql` (with the same D1/Turso migration command above), set `ADMIN_DASHBOARD_PASSWORD` in Cloudflare Worker Secrets, Vercel Environment Variables (production scope), Railway Variables, Render/Koyeb secrets, or your private Docker `.env` file. Generate a random unique 32+ character value and never commit it.
+
+Open `https://YOUR_DEPLOYED_DOMAIN/admin`. The page redirects to a server-verified password login and uses a database session and CSRF. A missing/weak secret disables `/admin` with 503, not a default administrator account. Use HTTPS for cookies. Session expires after 8 hours; logout invalidates it immediately.
+
+The UI handles product CRUD, one-by-one digital-key intake, physical order fulfillment and **review-only** bank/Stars reconciliation. This is the first secure admin MVP, not a full production ERP. There is no automatic shipping notice for a fulfillment action; the operator must confirm shipment with the customer. Never configure production admin/password secrets on public Vercel preview deployments.
