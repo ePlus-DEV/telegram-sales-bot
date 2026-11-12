@@ -19,11 +19,19 @@
 | Stars invoices + key delivery | Partial | Checkout, reserved inventory, delivery and outbox implemented; abandoned approved checkouts need reconciliation |
 | VietQR + SePay | Partial | Authenticated bank webhook, mismatch/late review; no live provider E2E verification |
 | Payment reliability | Partial | Replays, callback idempotency, expiry before pre-checkout, uncertain-refund review; at-least-once notification delivery |
-| Web Admin | Partial | Product CRUD, single-key intake, physical order fulfillment, review UI; no SSO/RBAC or bulk operations |
+| Web Admin | Partial | Product CRUD, single/bulk key intake, search/filter/page, safe aggregate stock export, audit and recorded-payment statistics; no physical stock or SSO/RBAC |
 | Two languages | Implemented | Bot and admin `vi/en`, Telegram language preference; product copy not localized |
 | Multi-platform deployment | Partial | Code/config for Workers, Vercel, Railway, Render, Koyeb and Docker; live deploy matrix unverified |
 
-## P0 — Release blockers (next)
+## Current implementation order — feature completion first
+
+The current development priority is **feature completeness before live staging deployment**, as requested by the project owner. Automated unit/integration tests and CI remain mandatory for every PR. Live staging validation and real-money end-to-end checks are **deferred**, not waived; they remain hard release gates.
+
+1. Finish Web Admin usability and inventory, localization of product content, physical order lifecycle and remaining refund reconciliation.
+2. Implement commerce enhancements only with safe payment/stock ledger invariants and tests.
+3. Return to P0 staging verification, provider-specific E2E, backup/restore and release-candidate approval **after feature scope is complete**.
+
+## P0 — Release blockers (deferred execution, required for launch)
 
 | Item | State | Acceptance criteria |
 | --- | --- | --- |
@@ -42,7 +50,7 @@
 
 | Item | State | Acceptance criteria |
 | --- | --- | --- |
-| Web Admin enhancements | Partial · [#6](https://github.com/ePlus-DEV/telegram-sales-bot/issues/6) | Search/filter/page products and orders; analytics; audit viewing; inventory operations beyond single-key add |
+| Web Admin enhancements | **Partial — feature-first progress** · [#6](https://github.com/ePlus-DEV/telegram-sales-bot/issues/6) | Added server-side search/filter/pagination, recorded-payment stats, audit log view, bulk key intake and aggregate CSV; still needs full inventory/physical stock lifecycle, advanced accounting, SSO/RBAC |
 | Product localization | Planned | Per-locale `name` and `description`, explicit fallback, migration, tests and English/Vietnamese editing UI |
 | Physical order management | Planned | Delivery address, shipping method/fee, physical stock, tracked fulfillment events and customer updates |
 | Key inventory protection | Planned | Encryption/rotation plan, bulk import/export policy, no secret leakage in UI/API/logs |

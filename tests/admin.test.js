@@ -246,3 +246,103 @@ test('English admin language works on login, product UI, notices and stored pref
   assert.equal(failure.status,401);
   assert.match(await failure.text(),/Invalid password/);
 });
+
+test('admin product search, filters and pagination are database-backed and safe',async()=>{
+  const db=testDb(),{cookie}=await login(db);
+  for(let i=1;i<=48;i++)
+    db.raw.prepare('INSERT INTO products(name,kind,price_stars,price_vnd,active) VALUES(?,?,?,?,?)')
+      .run('Widget '+i,i%2?'digital':'physical',i%2?10:0,i%2?0:1000,i%5?1:0);
+  const first=await (await get('/admin?tab=products',db,{cookie})).text();
+  assert.match(first,/Hiển thị 1/);
+  assert.match(first,/Trang 1\/3/);
+  assert.match(first,/page=2/);
+  assert.match(first,/Widget 48/);
+  assert.doesNotMatch(first,/Widget 1</);
+  const second=await (await get('/admin?tab=products&page=2',db,{cookie})).text();
+  assert.match(second,/Widget 28/);
+  assert.doesNotMatch(second,/Widget 48/);
+  const searched=await (await get('/admin?tab=products&q=Widget%2027&kind=digital',db,{cookie})).text();
+  assert.match(searched,/Widget 27/);
+  assert.doesNotMatch(searched,/Widget 26/);
+  const hidden=await (await get('/admin?tab=products&active=0',db,{cookie})).text();
+  assert.match(hidden,/Widget 45/);
+  assert.doesNotMatch(hidden,/Widget 48/);
+  const hostile=await (await get('/admin?tab=products&q=%3Cscript%3Ealert(1)%3C%2Fscript%3E',db,{cookie})).text();
+  assert.doesNotMatch(hostile,/<script>alert\(1\)<\/script>/);
+  assert.match(hostile,/&lt;script&gt;/);
+});
+
+test('order search filters include refund and expiry sidecar status; analytics avoids confirmed refunds',async()=>{
+  const db=testDb(),{cookie}=await login(db);
+  db.raw.prepare("INSERT INTO products(name,kind,price_vnd) VALUES('Mug','physical',15000)").run();
+  db.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Key','digital',20)").run();
+  db.raw.prepare("INSERT INTO orders(id,user_id,product_id,kind,provider,total_vnd,status,payment_ref) VALUES('EAAAAAAAAAAAA','76',1,'physical','sepay',15000,'PAID','bankref-1')").run();
+  db.raw.prepare("INSERT INTO orders(id,user_id,product_id,kind,provider,total_stars,status,payment_ref) VALUES('EBBBBBBBBBBBB','77',2,'digital','stars',20,'PAID','starref-1')").run();
+  db.raw.prepare("INSERT INTO orders(id,user_id,product_id,kind,provider,total_stars,status,payment_ref) VALUES('ECCCCCCCCCCCC','78',2,'digital','stars',30,'PAID','starref-2')").run();
+  db.raw.prepare("INSERT INTO star_refunds(order_id,user_id,charge_id,state) VALUES('ECCCCCCCCCCCC','78','starref-2','CONFIRMED')").run();
+  db.raw.prepare("INSERT INTO orders(id,user_id,product_id,kind,provider,total_vnd,status) VALUES('EDDDDDDDDDDD','79',1,'physical','sepay',15000,'PENDING')").run();
+  db.raw.prepare("INSERT INTO order_expirations(order_id) VALUES('EDDDDDDDDDDD')").run();
+  const overview=await (await get('/admin',db,{cookie})).text();
+  assert.match(overview,/Ghi nhận VND/);
+  assert.match(overview,/15.000/);
+  assert.match(overview,/Ghi nhận Stars/);
+  assert.match(overview,/Đơn đã ghi nhận thanh toán/);
+  const onlyRefund=await (await get('/admin?tab=orders&status=REFUNDED',db,{cookie})).text();
+  assert.match(onlyRefund,/ECCCCCCCCCCCC/);
+  assert.doesNotMatch(onlyRefund,/EBBBBBBBBBBBB/);
+  const expired=await (await get('/admin?tab=orders&status=EXPIRED',db,{cookie})).text();
+  assert.match(expired,/EDDDDDDDDDDD/);
+  assert.doesNotMatch(expired,/EAAAAAAAAAAAA/);
+  const search=await (await get('/admin?tab=orders&q=76&provider=sepay',db,{cookie})).text();
+  assert.match(search,/EAAAAAAAAAAAA/);
+  assert.doesNotMatch(search,/EBBBBBBBBBBBB/);
+});
+
+test('bulk key intake is authenticated, CSRF-protected, limited and never renders or logs key values',async()=>{
+  const db=testDb(),{cookie,csrf}=await login(db);
+  db.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('License','digital',5)").run();
+  const data={csrf,product_id:'1',keys:'SENSITIVE-K-001\nSENSITIVE-K-002\nSENSITIVE-K-003'};
+  assert.equal((await post('/admin/stock/bulk',data,db)).status,401);
+  assert.equal((await post('/admin/stock/bulk',{...data,csrf:'wrong'},db,cookie)).status,403);
+  assert.equal((await post('/admin/stock/bulk',data,db,cookie,{origin:'https://evil.example'})).status,403);
+  assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM digital_inventory').get().n,0);
+  assert.equal((await post('/admin/stock/bulk',data,db,cookie)).status,303);
+  assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM digital_inventory').get().n,3);
+  assert.equal((await post('/admin/stock/bulk',data,db,cookie)).status,303);
+  assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM digital_inventory').get().n,3,'existing keys are ignored');
+  assert.equal((await post('/admin/stock/bulk',{...data,keys:'DUPLICATE\nDUPLICATE'},db,cookie)).status,400);
+  assert.equal((await post('/admin/stock/bulk',{...data,keys:Array.from({length:51},(_,i)=>'K'+i).join('\n')},db,cookie)).status,400);
+  assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM digital_inventory').get().n,3);
+  const page=await (await get('/admin?tab=products',db,{cookie})).text();
+  assert.match(page,/Nhập key hàng loạt/);
+  assert.doesNotMatch(page,/SENSITIVE-K-00[123]/);
+  const audits=db.raw.prepare('SELECT action,target_id FROM admin_audit').all();
+  assert.ok(audits.some(x=>x.action==='STOCK_BULK_ADD'));
+  assert.doesNotMatch(JSON.stringify(audits),/SENSITIVE-K-00/);
+});
+
+test('inventory CSV export never exposes key values and requires valid admin session',async()=>{
+  const db=testDb();
+  db.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Sensitive product','digital',10)").run();
+  db.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value) VALUES(1,'TOP-SECRET-KEY')").run();
+  const denied=await get('/admin/export/inventory.csv',db);
+  assert.equal(denied.status,401);
+  const {cookie}=await login(db);
+  const accepted=await get('/admin/export/inventory.csv',db,{cookie});
+  assert.equal(accepted.status,200);
+  assert.match(accepted.headers.get('content-type'),/text\/csv/);
+  const csv=await accepted.text();
+  assert.match(csv,/product_id,kind,total,available,reserved,delivered/);
+  assert.match(csv,/1,digital,1,1,0,0/);
+  assert.doesNotMatch(csv,/TOP-SECRET|Sensitive product/);
+});
+
+test('audit tab lists only safe mutation metadata and is available only after login',async()=>{
+  const db=testDb(),{cookie,csrf}=await login(db);
+  await post('/admin/products/create',{csrf,kind:'physical',name:'Book',price:'12000'},db,cookie);
+  const publicAudit=await (await get('/admin?tab=audit',db)).text();
+  assert.doesNotMatch(publicAudit,/PRODUCT_CREATE/);
+  const privateAudit=await (await get('/admin?tab=audit',db,{cookie})).text();
+  assert.match(privateAudit,/PRODUCT_CREATE/);
+  assert.match(privateAudit,/Nhật ký thao tác/);
+});

@@ -45,12 +45,15 @@ Use **real order IDs only** when operating a test shop. Do not run a refund comm
 
 | Section | Available |
 | --- | --- |
-| Overview | Counts of active products, paid physical orders waiting for fulfillment, available keys and bank reviews |
-| Products | Create, update and disable products |
-| Inventory | Add keys individually; raw key contents are not shown afterward |
-| Orders | See recent 50 orders; mark paid physical orders complete |
+| Overview | Counts, recorded VND/Stars payments (not accounting balances), paid physical orders, pending alerts and bank reviews |
+| Products | Create/update/disable; search by name/ID, filter by kind/activity, paginate |
+| Inventory | Add keys individually or in batches of up to 50; export aggregate stock counts only, never raw keys |
+| Orders | Search by order/customer ID; filter provider and status; paginate; mark paid physical orders complete |
 | Reconciliation | Acknowledge bank reviews; see unresolved Stars refunds without reissuing the refund API |
+| Audit | Review recent mutation metadata; values of inventory keys are never displayed |
 
 Login uses an eight-hour server-side session with Secure/HttpOnly/SameSite=Strict cookies, Origin/CSRF checks and throttled password attempts. The interface supports Vietnamese/English. **No SSO, RBAC, export, bulk import, full dashboard analytics or refund action is available yet.**
 
 Read [Security](../SECURITY.md) before exposing the dashboard to external users.
+
+See the [Web Admin guide](ADMIN.md) for search, filters, bulk import rules, safe CSV export and financial-metric caveats.

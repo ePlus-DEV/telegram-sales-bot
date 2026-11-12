@@ -47,3 +47,9 @@ Node.js 24 preferred. Run `npm run check`, `npm test` and validate the Docker bu
 - `.github/workflows/staging-validation.yml` must remain manual-only, scoped to main and GitHub Environment staging, with read-only permissions. Never introduce scheduled execution, webhook registration, order mutations or production secrets.
 - Staging HTTP smoke must only send intentionally unauthenticated Telegram/SePay requests and safe Admin authentication/logout flows; enforce staging-only HTTPS hostnames and no redirect following.
 - Always distinguish offline checks, a remote staging HTTP/DB check, and a supervised payment E2E test. Passing one does not imply the others passed.
+
+## Feature-first development priority
+- Staging/live provider E2E execution is deferred until requested; CI and local tests still run for every PR. Do not claim live readiness.
+- Complete Web Admin features incrementally on independent branches with Draft PRs and tests, before staging rollout.
+- Only offer **aggregate inventory CSV** (product IDs and counts); do not export raw keys. Admin bulk imports must be bounded, non-echoing and CSRF protected.
+- Financial dashboard figures must be labeled as **recorded order totals**, not bank balances or audited net revenue.

@@ -10,6 +10,7 @@
 | Configure secrets and bank details | [Configuration](CONFIGURATION.md) |
 | Understand Stars, SePay, refunds and order expiry | [Payments](PAYMENTS.md) |
 | Find Telegram buyer/admin commands | [Commands](COMMANDS.md) |
+| Use Web Admin search, bulk inventory and audit | [Web Admin](ADMIN.md) |
 | Diagnose incidents, back up, and operate safely | [Operations](OPERATIONS.md) |
 | Understand what ships next | [Roadmap](../ROADMAP.md) |
 | Contribute a fix | [Contributing](../CONTRIBUTING.md) / [AGENTS.md](../AGENTS.md) |
