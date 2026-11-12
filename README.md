@@ -44,6 +44,7 @@ git clone https://github.com/ePlus-DEV/telegram-sales-bot.git
 cd telegram-sales-bot
 npm install
 npm run check
+npm run staging:check-migrations
 npm test
 ```
 
@@ -73,6 +74,7 @@ Read [payment flows & limitations](docs/PAYMENTS.md), [security policy](SECURITY
 | [Payments](docs/PAYMENTS.md) | Stars vs VietQR/SePay, idempotency, expiry/refunds |
 | [Commands](docs/COMMANDS.md) | Buyer and admin bot commands; Web Admin |
 | [Operations](docs/OPERATIONS.md) | Health checks, monitoring, backups, incident response |
+| [Staging validation](docs/STAGING_VALIDATION.md) | Offline migrations, webhook/Admin smoke tests and protected manual staging workflow |
 | [Roadmap](ROADMAP.md) | Current milestone, priorities and release gates |
 | [Contributing](CONTRIBUTING.md) · [AI rules](AGENTS.md) | Development conventions, PR expectations |
 

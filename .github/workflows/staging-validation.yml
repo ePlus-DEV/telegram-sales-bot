@@ -1,0 +1,54 @@
+name: Staging Validation (manual, read-only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: telegram-sales-staging-validation
+  cancel-in-progress: false
+jobs:
+  staging-smoke:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: staging
+      deployment: false
+    env:
+      STAGING_BASE_URL: ${{ vars.STAGING_BASE_URL }}
+      STAGING_DB_PROVIDER: ${{ vars.STAGING_DB_PROVIDER }}
+      STAGING_ADMIN_DASHBOARD_PASSWORD: ${{ secrets.STAGING_ADMIN_DASHBOARD_PASSWORD }}
+      STAGING_TURSO_DATABASE_URL: ${{ secrets.STAGING_TURSO_DATABASE_URL }}
+      STAGING_TURSO_AUTH_TOKEN: ${{ secrets.STAGING_TURSO_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Enforce staging-only configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${STAGING_BASE_URL}" || -z "${STAGING_ADMIN_DASHBOARD_PASSWORD}" ]]; then
+            echo "::error::Configure staging environment variable STAGING_BASE_URL and staging-only secret STAGING_ADMIN_DASHBOARD_PASSWORD."
+            exit 1
+          fi
+          if [[ "${STAGING_DB_PROVIDER:-cloudflare}" != "cloudflare" && "${STAGING_DB_PROVIDER}" != "turso" ]]; then
+            echo "::error::STAGING_DB_PROVIDER must be cloudflare or turso."
+            exit 1
+          fi
+          if [[ "${STAGING_DB_PROVIDER:-cloudflare}" == "turso" && ( -z "${STAGING_TURSO_DATABASE_URL}" || -z "${STAGING_TURSO_AUTH_TOKEN}" ) ]]; then
+            echo "::error::Provide both STAGING_TURSO_DATABASE_URL and STAGING_TURSO_AUTH_TOKEN for Turso."
+            exit 1
+          fi
+      - name: Local migration integrity
+        run: npm run staging:check-migrations
+      - name: Staging HTTP and Admin smoke (no payments)
+        run: npm run staging:smoke
+      - name: Staging Turso read-only schema probe
+        if: env.STAGING_DB_PROVIDER == 'turso'
+        run: npm run staging:check-turso

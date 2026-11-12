@@ -144,3 +144,7 @@ For physical orders, set SePay's incoming-bank-transfer JSON webhook to `https:/
 - Confirm migration, backup/restore, cron or alternative maintenance procedure, and alerts.
 
 See the [payment matrix](PAYMENTS.md) and [operations runbook](OPERATIONS.md). The application is **not yet certified as production ready**.
+
+## Staging validation (manual only)
+
+After your staging environment is independently deployed, run the safe HTTP checks and local migration validation described in [Staging Validation](STAGING_VALIDATION.md). The dedicated GitHub Actions workflow is `workflow_dispatch` only, uses Environment `staging`, and has no deploy, Telegram registration or real-payment steps. Do not claim provider verification before a staging workflow actually passes against that provider.
