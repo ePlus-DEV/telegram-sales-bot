@@ -1,0 +1,10 @@
+name = "eplus-telegram-sales-bot"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "eplus-telegram-sales-bot"
+# Replace this value with ID returned by "npx wrangler d1 create eplus-telegram-sales-bot"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
