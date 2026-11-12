@@ -5,7 +5,13 @@ import { handleRequest } from './runtime.js';
 export function createServer(env = process.env) {
   return http.createServer(async (req, res) => {
     try {
-      const url = new URL(req.url || '/', 'http://localhost');
+      // Preserve the public origin for Origin/CSRF checks when running behind
+      // Railway/Render/Koyeb TLS termination. Host usually carries the public
+      // authority; X-Forwarded-Proto is set by the hosting edge.
+      const host=String(req.headers.host||'localhost');
+      const forwarded=String(req.headers['x-forwarded-proto']||'').split(',')[0].trim();
+      const scheme=forwarded==='https'?'https':'http';
+      const url = new URL(req.url || '/', scheme+'://'+host);
       const options = { method: req.method, headers: req.headers };
       if (req.method !== 'GET' && req.method !== 'HEAD') {
         options.body = Readable.toWeb(req);

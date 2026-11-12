@@ -23,3 +23,9 @@ Node.js 24 preferred. Run `npm run check`, `npm test` and validate the Docker bu
 - Never re-issue an uncertain Stars refund operation without checking Telegram first; retain immutable charge IDs.
 - Record late/mismatched SePay transfers for explicit review, never credit them against a different order.
 - D1 and Turso must have identical forward-only migrations. Add negative/replay/race tests for payment changes.
+
+## Web Admin requirements
+- Admin routes are server-side authenticated. No client-only admin role checks, localStorage tokens or hard-coded passwords.
+- Every mutation requires HttpOnly session, same-origin validation, CSRF and SQL-bound parameters; record a safe audit event.
+- Never expose raw inventory keys, DB tokens, payment secrets, or admin password in HTML, API, logs or PR descriptions.
+- Use forward-only migrations on both D1 and Turso. Validate unauthorized, CSRF, XSS, rate-limit and ledger invariant cases in CI.

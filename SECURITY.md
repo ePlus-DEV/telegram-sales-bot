@@ -21,3 +21,10 @@ Do not enable live transactions until a security and operations review is comple
 - Verify Stars refund outcomes in Telegram if the API times out; do not retry an unknown refund automatically.
 - Review unallocated/late bank transfers through `/bankreviews`; `/ackbank` records human review only.
 - Run migration 0004 before deploying, and verify the Cloudflare scheduled worker or an equivalent trusted maintenance process.
+
+## Admin Dashboard
+- Generate a unique 32+ character `ADMIN_DASHBOARD_PASSWORD` and store it in hosting secret settings. Never commit a default password.
+- Dashboard is disabled without a 16+ character secret. Use only HTTPS (Secure/HttpOnly/SameSite cookies) and the server-side session table; logout revokes the session.
+- Mutations require CSRF token and Origin validation, parameterized SQL, and append-only audit events without sensitive payloads.
+- Login attempts are throttled per edge IP when available and globally otherwise; consider identity-aware proxy/SSO for production.
+- No raw credentials are rendered in HTML, but digital inventory remains plaintext in D1/Turso until encryption-at-rest and key rotation are implemented.

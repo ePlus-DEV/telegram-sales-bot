@@ -2,6 +2,7 @@ import { constantTimeEqual, validPositiveInt, sepayPayment } from './domain.js';
 import { createPurchase, recoverInvoice, approvePrecheckout } from './purchase.js';
 import { enqueueNotification, flushNotifications } from './notifications.js';
 import { expirePendingOrders, recordBankReview, listBankReviews, acknowledgeBankReview, listRefundReviews, refundPaidStars } from './reconciliation.js';
+import { handleAdminRequest } from './admin/handler.js';
 
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -290,6 +291,7 @@ export default {
   },
   async fetch(request, env, ctx) {
     const path = new URL(request.url).pathname;
+    if (path === '/admin' || path.startsWith('/admin/')) return handleAdminRequest(request,env);
     if (request.method === 'GET' && path === '/healthz') return json({ ok: true, service: 'telegram-sales-bot' });
     if (request.method !== 'POST') return json({ error: 'not found' }, 404);
     if (path === '/telegram/webhook') {

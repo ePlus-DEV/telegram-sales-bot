@@ -25,3 +25,5 @@ services:
         sync: false
       - key: SUPPORT_USERNAME
         sync: false
+
+# Configure ADMIN_DASHBOARD_PASSWORD manually as a secret in Render dashboard.

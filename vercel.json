@@ -4,6 +4,8 @@
   "rewrites": [
     { "source": "/healthz", "destination": "/api/healthz" },
     { "source": "/telegram/webhook", "destination": "/api/telegram-webhook" },
-    { "source": "/sepay/webhook", "destination": "/api/sepay-webhook" }
+    { "source": "/sepay/webhook", "destination": "/api/sepay-webhook" },
+    { "source": "/admin", "destination": "/api/admin" },
+    { "source": "/admin/:path*", "destination": "/api/admin?admin_path=:path*" }
   ]
 }
