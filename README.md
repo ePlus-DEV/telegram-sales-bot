@@ -31,6 +31,17 @@ A lightweight, open-source **Telegram storefront** by **ePlus.DEV** built for **
 
 **Important:** Deploying code does not automatically configure the Telegram or SePay webhook, and does not automatically migrate D1 data to Turso. Use **one active environment per bot token**: setting a new Telegram webhook endpoint routes updates to that environment. Avoid using real payment credentials on preview deployments.
 
+
+### Reliable payment delivery (P0)
+
+Apply **both** database migrations (\`0001\` and \`0002\`) before running this release:
+- Cloudflare: \`npm run db:migrate\`
+- Turso/Vercel/Railway/Render: \`npm run db:migrate:turso\`
+
+The new \`notification_outbox\` table keeps notification intents when a payment has already settled. If Telegram is unreachable, the webhook returns a retriable error; a later delivery of the same payment event retries only **unsent** notifications. Cloudflare's cron retries pending or expired-lease notifications every five minutes. Admins on any provider can send \`/retryalerts\` to recover up to 20 pending notifications per run.
+
+Important: Telegram \`sendMessage\` has no idempotency key. A worker that crashes after Telegram accepted a message but before D1/Turso records \`SENT\` may still send a duplicate. The order state and key allocation remain idempotent. For digital goods, customers can always use \`/mykey ORDER_ID\` to fetch an already assigned key. **Unpaid invoice expiration and refund recovery are not yet implemented** and remain pre-production blockers.
+
 ## What works
 
 | Feature | MVP |
@@ -174,7 +185,8 @@ For webhook testing you need an HTTPS endpoint reachable by Telegram/SePay; loca
 
 ## Roadmap
 
-- [ ] Idempotent Telegram update consumption and resilient outbox notifications
+- [x] Durable payment-notification outbox, retry via webhook replay, Cloudflare cron and admin `/retryalerts`
+- [ ] Idempotent Telegram update consumption (non-payment callbacks)
 - [ ] Digital-item reservations TTL, cancellations, refunds, and recovery after delivery failure
 - [ ] Shipping addresses, physical inventory, stock reservation, and fulfillment tracking
 - [ ] Admin dashboard protected with strong authentication, audit trail and rate limits
