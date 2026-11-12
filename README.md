@@ -1,259 +1,83 @@
 # ePlus Telegram Sales Bot
 
 [![CI](https://github.com/ePlus-DEV/telegram-sales-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/ePlus-DEV/telegram-sales-bot/actions/workflows/ci.yml)
-![License](https://img.shields.io/badge/license-MIT-blue)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A lightweight, open-source **Telegram storefront** by **ePlus.DEV** built for **Cloudflare Workers + D1**. No polling, VPS, Redis, or always-on process is required.
+**Self-hosted Telegram storefront** with Vietnamese bank payments for physical goods, Telegram Stars for digital goods, and a lightweight web admin. Built with Node.js, Cloudflare Workers/D1, and an optional Turso-backed deployment.
 
-> **Early MVP:** Review code and run test payments before accepting real money. Not a production-hardened commerce product yet.
+**Tiếng Việt:** Bot bán hàng Telegram mã nguồn mở, hỗ trợ VietQR + SePay, Telegram Stars, giao key tự động, dashboard quản trị và giao diện Việt/Anh. Xem [hướng dẫn tiếng Việt](docs/GETTING_STARTED.vi.md).
 
-## Deploy options (Cloudflare, Vercel, Railway, Render, Koyeb, Docker)
+> **Status: early MVP / chưa sẵn sàng production.** CI validates code and Docker builds; a complete live deployment and real-payment/refund end-to-end test have **not** been verified. Never enable customer payments solely on the strength of a green CI badge.
 
-**One backend, multiple runtimes.** Cloudflare Workers use native D1. All other targets use **Turso/libSQL** (remote persisted SQLite, not the host's temporary local filesystem). The Telegram and SePay webhook routes remain identical on every provider.
+## Features at a glance
 
-| Target | Backend | Database | Deployment | Notes |
-| --- | --- | --- | --- | --- |
-| Cloudflare Workers | Fetch handler | D1 | `npm run deploy` | Best for no always-on server, no extra database account |
-| [Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot&env=TURSO_DATABASE_URL,TURSO_AUTH_TOKEN,BOT_TOKEN,TELEGRAM_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,ADMIN_TELEGRAM_ID,BANK_BIN,BANK_ACCOUNT_NO,BANK_ACCOUNT_NAME) | Serverless Functions | Turso | [Deploy to Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot) | The `vercel.json` rewrite maps public routes to functions |
-| [Railway](https://railway.com/new) | Node HTTP via Docker | Turso | GitHub → deploy `Dockerfile` | Persistent service; credits and plan limits apply |
-| [Render](https://render.com/deploy?repo=https://github.com/ePlus-DEV/telegram-sales-bot) | Node HTTP via Docker | Turso | [Deploy to Render](https://render.com/deploy?repo=https://github.com/ePlus-DEV/telegram-sales-bot) | Free web service sleeps when idle; webhook cold starts may be problematic |
-| [Koyeb](https://app.koyeb.com/apps/new) | Node HTTP via Docker | Turso | Import GitHub and Dockerfile | Free instance limits and idle behavior apply |
-| Docker / VPS / EasyPanel | Node HTTP | Turso | `docker build`, `docker run` | You control uptime and HTTPS proxy |
+| Area | Implemented | Not yet complete |
+| --- | --- | --- |
+| Telegram shop | Product catalog, Buy buttons, order history, `/invoice`, `/mykey` | Cart, quantities, coupons, referrals |
+| Payments | VietQR + authenticated SePay webhook for **physical** orders; Stars invoices for **digital** orders | payOS/MoMo/VNPay; provider E2E certification |
+| Reliability | Payment event deduplication, notification outbox, safe unapproved-order expiry, manual reconciliation | Full abandoned-checkout/refund/dispute recovery |
+| Digital delivery | Preloaded key reservation, one-key fulfillment, customer key retrieval | Encrypted inventory, bulk key import |
+| Web Admin | Password login, session/CSRF protection, products, single-key intake, orders, bank review | SSO/RBAC, richer analytics, export |
+| Languages | Vietnamese / English for bot and admin; saved Telegram preference | Translated product fields, more locales |
 
-**Setup for non-Cloudflare hosts** (read [full deployment guide](docs/DEPLOYMENT.md)):
+The current implementation is **not** a hosted store or a production guarantee. Product titles and descriptions are supplied by the shop owner and are not automatically translated.
 
-1. Create a remote [Turso](https://turso.tech/) database and obtain `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
-2. Run `npm run db:migrate:turso` on your machine or CI using the two variables; never run migrations against a production database without backup.
-3. Connect the repository to the desired platform; configure the variables from [`.env.example`](.env.example).
-4. Deploy and verify `https://YOUR_DOMAIN/healthz` responds `{"ok":true,...}`.
-5. Set `PUBLIC_BASE_URL=https://YOUR_DOMAIN`, `BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` locally, then run `npm run webhook:register`.
-6. For physical products, configure SePay callback URL `https://YOUR_DOMAIN/sepay/webhook` and verify end-to-end with a test bank transfer. Digital products use Telegram Stars.
+## Choose your deployment
 
-**Important:** Deploying code does not automatically configure the Telegram or SePay webhook, and does not automatically migrate D1 data to Turso. Use **one active environment per bot token**: setting a new Telegram webhook endpoint routes updates to that environment. Avoid using real payment credentials on preview deployments.
+| Platform | App runtime | Persistent database | Start here |
+| --- | --- | --- | --- |
+| **Cloudflare Workers** | Webhooks/serverless | **Cloudflare D1** | [Cloudflare setup](docs/DEPLOYMENT.md#cloudflare-workers--d1) |
+| **Vercel** | Serverless functions | **Turso** | [Vercel setup](docs/DEPLOYMENT.md#vercel--turso) |
+| **Railway** | Node.js / Docker | **Turso** | [Railway setup](docs/DEPLOYMENT.md#railway--turso) |
+| **Render** | Node.js / Docker | **Turso** | [Render setup](docs/DEPLOYMENT.md#render--turso) |
+| **Koyeb** | Node.js / Docker | **Turso** | [Koyeb setup](docs/DEPLOYMENT.md#koyeb--turso) |
+| **Docker / VPS / EasyPanel** | Node.js / Docker | **Turso** | [Docker setup](docs/DEPLOYMENT.md#docker--vps--easypanel) |
 
+**Recommendation for testing:** Cloudflare Workers + D1 avoids an always-running server and a second database provider. Free plans have quotas; cold starts or quota exhaustion on other platforms can delay payment callbacks. Deployment configurations exist, but **no provider is claimed to have passed a live end-to-end deployment test**.
 
-### Reliable payment delivery (P0)
+## Quick start
 
-Apply **both** database migrations (\`0001\` and \`0002\`) before running this release:
-- Cloudflare: \`npm run db:migrate\`
-- Turso/Vercel/Railway/Render: \`npm run db:migrate:turso\`
+Requires **Node.js 22+ (24 preferred)** and a Telegram bot from [@BotFather](https://t.me/BotFather).
 
-The new \`notification_outbox\` table keeps notification intents when a payment has already settled. If Telegram is unreachable, the webhook returns a retriable error; a later delivery of the same payment event retries only **unsent** notifications. Cloudflare's cron retries pending or expired-lease notifications every five minutes. Admins on any provider can send \`/retryalerts\` to recover up to 20 pending notifications per run.
-
-Important: Telegram \`sendMessage\` has no idempotency key. A worker that crashes after Telegram accepted a message but before D1/Turso records \`SENT\` may still send a duplicate. The order state and key allocation remain idempotent. For digital goods, customers can always use \`/mykey ORDER_ID\` to fetch an already assigned key. **Unpaid invoice expiration and refund recovery are not yet implemented** and remain pre-production blockers.
-
-### Idempotent purchases and invoice recovery (issue #4)
-
-Apply migration `0003_purchase_intents.sql` before deploying this version: run `npm run db:migrate` for D1 or `npm run db:migrate:turso` for Turso. The `purchase_intents` table records one **callback_query.id → order** mapping in the same atomic database batch as the order and key reservation.
-
-Digital products use `createInvoiceLink` and persist the Telegram Stars invoice link. If the first message is lost, the buyer can use `/invoice ORDER_ID` to retrieve their own invoice (other buyers cannot). Repeated callbacks do not create extra orders or reserve extra keys. Pre-migration Stars orders without a purchase-intent record are automatically backfilled when Telegram sends their first pre-checkout query. Only the first unique Stars `pre_checkout_query.id` can be approved for an order; retries of that **same query** are accepted until settlement.
-
-**Remaining limitation:** a first approved checkout that never completes remains locked to that query; issue #5 will add expiration and reconciliation. Users can place a separate new order with a new Buy callback; already-approved orders must be reconciled before inventory is released.
-
-### Payment expiration, late-bank review and Stars refund safeguards (P0)
-
-Apply migration `0004_payment_reconciliation.sql` **before deploying this version**. Cloudflare D1: `npm run db:migrate`; Vercel, Railway, Render, Koyeb and Docker with Turso: `npm run db:migrate:turso`. Take a database backup first.
-
-- **Unapproved PENDING orders only:** after **30 minutes** (physical) or **24 hours** (Stars), the Cloudflare cron marks them expired. Digital keys are returned to stock only if no Stars `pre_checkout_query` was ever approved. Customize with optional `PHYSICAL_ORDER_TTL_MINUTES` and `STARS_ORDER_TTL_MINUTES` (5–10080 minutes). Values outside this range use safe defaults.
-- **Previously approved Stars checkouts never auto-expire or release stock.** Telegram can finish an approved payment asynchronously. Admins must reconcile abandoned approvals manually; do not forcibly release their reserved keys. Telegram requires answering pre-checkout within 10 seconds.
-- **Expired invoices** no longer return pay links or QR prompts. Any unexpected Stars payment arriving after expiry is recorded as paid, **not silently discarded**, but key delivery is blocked and sent to manual review.
-- **SePay late/mismatched deposits** (unknown order, wrong amount, expired order, already paid) are logged in `bank_payment_reviews` by unique SePay transaction ID and are **not** credited automatically. Run `/bankreviews` to view, `/ackbank ID` after external reconciliation to mark reviewed. Acknowledging alone does **not** issue a bank refund or credit.
-- **Stars refunds:** Admin `/refundstars ORDER_ID` invokes the official `refundStarPayment` only for a paid but **not fulfilled** digital order and locks the order before the request. A successful API result is recorded as `CONFIRMED`. An unknown/error result becomes `NEEDS_REVIEW` (or stays `CALLING` after process failure), visible via `/refundreviews`; the app **never automatically repeats a refund API call**. Reconcile with Telegram before deciding whether any further manual action is necessary.
-- **Maintenance:** Cloudflare cron runs expiry and notification outbox every five minutes. On other hosts, admin can run `/expireorders` and `/retryalerts`; add a trusted external scheduler only after securely configuring operations. Do **not** rely on ephemeral files for payment records.
-
-New admin commands: `/expireorders`, `/bankreviews`, `/ackbank TRANSACTION_ID`, `/refundstars ORDER_ID`, `/refundreviews`. **Bank refunds remain manual through your bank/payment provider.**
-
-Current limitations: no live gateway test was performed; no automatic reconciliation of approved but abandoned Stars checkouts; no automatic bank refund; no Telegram refund status polling. Do not mark the product production-ready yet. Telegram reference: https://core.telegram.org/bots/api#refundstarpayment and https://core.telegram.org/bots/payments-stars. SePay reference: https://docs.sepay.vn/tich-hop-webhooks.html.
-
-## Web Admin Dashboard (issue #6)
-
-After migration `0005_web_admin.sql`, the owner can manage the store at **`https://YOUR_DEPLOYED_DOMAIN/admin`** on Cloudflare Workers, Vercel, Railway, Render, Koyeb or Docker.
-
-The dashboard includes:
-- **Overview:** active products, paid physical orders awaiting delivery, available digital keys and bank transfers to review.
-- **Products:** create/edit/disable physical and digital products, with enforced VND vs Telegram Stars pricing.
-- **Stock:** add one digital key at a time. The raw key is **never displayed back** on the dashboard, but remains stored in the database for delivery; protect database access.
-- **Orders:** view recent 50 orders and mark **PAID physical** orders as fulfilled, without changing payment records.
-- **Reconciliation:** list late/unmatched bank transfers, acknowledge review, and view pending Stars refund statuses without performing or repeating refunds from the web UI.
-
-**Mandatory setup:** configure a high-entropy `ADMIN_DASHBOARD_PASSWORD` (at least 16 characters, preferably generated 32+ chars) in your hosting **secret/environment settings**. Without it, `/admin` returns **503** and cannot be logged into. No default password or master bypass exists. The dashboard uses a hashed, server-stored 8-hour session, `Secure`/`HttpOnly`/`SameSite=Strict` cookie, CSRF tokens, origin checks, IP-based login throttling (with a global fallback), restrictive CSP and an audit table for mutations.
-
-**Before changing code in production:** run migrations for the target database (`npm run db:migrate` for Cloudflare D1 or `npm run db:migrate:turso` for Turso). Set a strong password **before exposing the dashboard**. `ADMIN_DASHBOARD_PASSWORD` is not the Telegram bot token and must never be included in GitHub commits, logs or public client-side JavaScript.
-
-**Safety boundaries:** Dashboard intentionally does not expose raw key inventory, export user credentials, or issue refunds. Physical shipping notification is not automatically sent from a dashboard action; inform customers separately. For high-volume shops use external identity/SSO and add further controls before production.
-
-## Languages / Ngôn ngữ (vi, en)
-
-The Telegram bot and Web Admin interface support **Tiếng Việt** and **English** without adding an external translation service or frontend framework.
-
-- Telegram automatically uses `from.language_code` (`en`, `en-US`, `vi`, `vi-VN`); unsupported or missing languages fall back to **Vietnamese**.
-- Customers can type **`/language`** for a Vietnamese/English selector, or **`/lang vi`** / **`/lang en`**. A manual choice is saved in D1/Turso `user_locales` and takes priority over future Telegram language codes.
-- Messages for product catalog, orders, Stars invoices, bank-transfer QR instructions, fulfillment, payment alerts, refund status and admin bot commands follow the recipient's stored language. Background SePay/Stars notifications look up the recipient locale.
-- Web Admin has a **🇻🇳 / 🇬🇧** selector on the login page and dashboard, persists the non-sensitive choice in an admin-scoped Secure cookie, and renders translated labels/validation errors without client-side translation scripts. Access controls, CSRF and server-side session remain unchanged.
-- Product titles and descriptions entered by the store owner are **not automatically translated**. Localized product content is a separate roadmap feature; current catalog displays owner-entered content verbatim.
-- To add languages, extend `src/i18n.js` (Telegram messages) and `src/admin/locales.js` (Web Admin). Do not embed new UI copy directly into payment logic.
-
-**Database migration:** run `0006_locales.sql` on **D1 or Turso** before deploying localized code (`npm run db:migrate` or `npm run db:migrate:turso`); take a backup before migrations. Existing customers default to Vietnamese until they interact with the bot or select a language.
-
-## What works
-
-| Feature | MVP |
-| --- | --- |
-| Product catalog and inline Buy buttons | Yes |
-| Physical products: VietQR bank transfer | Yes |
-| SePay authenticated webhook and matching payment by unique order ID, bank account, and exact amount | Yes |
-| Digital products: Telegram Stars (XTR) invoice links | Yes |
-| Automatic delivery of one preloaded digital key after Stars payment | Yes |
-| Customer order history and re-fetch a delivered key | Yes |
-| Admin commands for products, keys, orders, and marking shipped physical orders complete | Yes |
-| Cloudflare D1 persistent storage | Yes |
-| Web Admin (product CRUD, stock intake, physical order fulfillment and payment review) | Yes, password-protected |
-| Carts, multiple quantities, payOS, coupons, shipping rates, physical inventory | Not implemented |
-
-### Important Telegram payment rules
-
-**Digital products sold inside Telegram must use Telegram Stars (XTR), not bank transfer, VietQR, SePay, payOS or crypto.** VietQR/SePay in this project are **only offered for physical goods/services**. Read the [official Telegram payment rules](https://core.telegram.org/bots/payments-stars). Do not remove this separation without reviewing Telegram's current policy.
-
-**Bank transfer does not complete physical shipping.** An admin must fulfil the order manually after verifying the shipment.
-
-## Cloudflare Workers + D1 (native deployment)
-
-Cloudflare Workers Free and D1 Free have usage/storage quotas. Hitting the quota interrupts service until it resets or the account is upgraded; free availability is not an uptime guarantee. The project uses Telegram Webhooks so no background daemon is necessary.
-
-**Requirements:** Node.js 22+ (24 recommended), Cloudflare account, Telegram bot token from [@BotFather](https://t.me/BotFather). For physical products: supported bank account and a SePay account with webhook API-key authentication.
-
-1. Clone your repo and install tooling:
-
-   ~~~sh
-   git clone https://github.com/ePlus-DEV/telegram-sales-bot
-   cd telegram-sales-bot
-   npm install
-   npx wrangler login
-   ~~~
-
-2. Create the database:
-
-   ~~~sh
-   npx wrangler d1 create eplus-telegram-sales-bot
-   ~~~
-
-   Paste the returned database UUID into `wrangler.toml` as `database_id`. **The checked-in placeholder must be replaced before deployment.**
-
-3. Apply the migration and deploy the Worker:
-
-   ~~~sh
-   npm run db:migrate
-   npm run deploy
-   ~~~
-
-4. Set these secrets using `npx wrangler secret put NAME` (one prompt per secret):
-
-   - `BOT_TOKEN` — secret Telegram token
-   - `TELEGRAM_WEBHOOK_SECRET` — randomly generated alphanumeric token (setWebhook secret_token)
-   - `SEPAY_WEBHOOK_API_KEY` — secret configured for SePay API-Key authentication
-
-   Set the following Worker variables as environment variables in the Cloudflare dashboard or `wrangler.toml` `[vars]` section (never store actual credentials in git):
-
-   - `ADMIN_TELEGRAM_ID` — your numeric Telegram user ID
-   - `BANK_BIN` — VietQR bank BIN (example: 970422)
-   - `BANK_ACCOUNT_NO` — recipient account number
-   - `BANK_ACCOUNT_NAME` — recipient's name
-   - `SUPPORT_USERNAME` — public Telegram username without @, optional
-
-   Set `SEPAY_WEBHOOK_API_KEY` even when testing digital products: the SePay endpoint rejects requests without the configured secret.
-
-5. Register Telegram webhook. Use the publicly returned Worker URL and your actual secret **from your terminal environment**:
-
-   ~~~sh
-   export BOT_TOKEN='...'
-   export TELEGRAM_WEBHOOK_SECRET='...'
-   export PUBLIC_BASE_URL='https://eplus-telegram-sales-bot.YOUR_SUBDOMAIN.workers.dev'
-   npm run webhook:register
-   ~~~
-
-   On Windows PowerShell use `$env:BOT_TOKEN="..."`, etc. The script never prints secrets.
-
-6. In [SePay Webhooks](https://my.sepay.vn), select **Có tiền vào**, the same recipient account number, **API Key** authentication, JSON payload, and endpoint:
-
-   ~~~text
-   https://YOUR_WORKER_URL/sepay/webhook
-   ~~~
-
-   For some older SePay webhooks, **201** is required; this MVP responds **200** with `{"success":true}`. Check your dashboard delivery logs and adjust if your account still requires 201.
-
-7. Test `GET /healthz`, Telegram `/start`, and the following admin/user flows. Do not accept real payments until verified.
-
-### Admin commands
-
-| Command | Example |
-| --- | --- |
-| `/admin` | Display available admin commands |
-| `/addphysical Name \| VND \| Description` | `/addphysical Coffee mug \| 120000 \| Ceramic mug` |
-| `/adddigital Name \| Stars \| Description` | `/adddigital License \| 50 \| One key` |
-| `/addkey ProductID \| Key` | `/addkey 2 \| ABC-123-XYZ` |
-| `/adminorders` | Show latest 10 orders |
-| `/fulfill OrderID` | Mark a paid physical order completed |
-
-### User commands
-
-- `/start` — welcome
-- `/catalog` or `/products` — product list
-- `/orders` — recent orders and status
-- `/mykey ORDER_ID` — retrieve your own already delivered digital key
-- `/paysupport` — support contact
-
-**Privacy:** Keys are stored in the D1 database as plaintext in this MVP. Protect D1 access, backups, and admin credentials; avoid using high-value credentials until encryption/rotation and audit controls are added.
-
-## Local development
-
-Create `.dev.vars` from `.dev.vars.example`, fill real local credentials (ignored by git), then:
-
-~~~sh
-npm run db:migrate:local
-npm run dev
+```bash
+git clone https://github.com/ePlus-DEV/telegram-sales-bot.git
+cd telegram-sales-bot
+npm install
 npm run check
 npm test
-~~~
+```
 
-For webhook testing you need an HTTPS endpoint reachable by Telegram/SePay; local `localhost` URLs are insufficient. See [multi-platform deployment guide](docs/DEPLOYMENT.md).
+Then choose a deployment, create the database, apply **all six migrations (0001–0006)**, configure hosting secrets, deploy, and **register your Telegram webhook separately**. A healthy `/healthz` endpoint is not proof that payments work.
 
-## Architecture
+- [Getting started (English)](docs/GETTING_STARTED.md)
+- [Bắt đầu sử dụng (Tiếng Việt)](docs/GETTING_STARTED.vi.md)
+- [Deployment instructions — all platforms](docs/DEPLOYMENT.md)
+- [Configuration & environment variables](docs/CONFIGURATION.md)
 
-- `src/index.js`: HTTP routes, Telegram Bot API integration, payment flows
-- `src/runtime.js`, `src/adapters/turso.js`: portable DB adapter with D1-compatible queries
-- `src/server.js`: Node HTTP server for Docker, Railway, Render and Koyeb
-- `api/`, `vercel.json`: Vercel Serverless Functions adapters and rewrites
-- `src/domain.js`: validated payment and order helpers
-- `migrations/`: D1 schema
-- `scripts/register-webhook.mjs`: explicit Telegram setWebhook registration
-- `tests/`: unit and webhook tests using Node's built-in SQLite
-- `.github/workflows/ci.yml`: non-deploy validation
+## Payments and security
 
-### Security / payment invariants
+**Telegram Stars (XTR) must be used for digital goods/services sold inside Telegram.** VietQR + SePay is provided for eligible **physical** goods, with no automatic shipment. Do not reroute digital purchases to bank transfer or other external gateways. See [Telegram's official Stars documentation](https://core.telegram.org/bots/payments-stars).
 
-- Telegram Webhooks require `X-Telegram-Bot-Api-Secret-Token`.
-- SePay Webhooks require `Authorization: Apikey <secret>`, match recipient bank account, payment direction, exact amount, and **13-character random order code**.
-- SePay transaction IDs and Telegram Stars charge IDs are uniquely recorded in the payment ledger (duplicates must not settle other orders).
-- A customer can retrieve only a key attached to their own fulfilled order.
-- The source code never checks in bot tokens, bank credentials, or API keys.
+Payment webhooks must be authenticated; transfers need correct bank account, exact amount and order memo. Paid-but-undelivered items and ambiguous refund outcomes require human intervention. Digital keys currently remain **plaintext in D1/Turso**, so restrict database and backup access.
 
-## Roadmap
+Read [payment flows & limitations](docs/PAYMENTS.md), [security policy](SECURITY.md), and [operations & recovery](docs/OPERATIONS.md) before production use.
 
-- [x] Durable payment-notification outbox, retry via webhook replay, Cloudflare cron and admin `/retryalerts`
-- [ ] Idempotent Telegram update consumption (non-payment callbacks)
-- [x] Unapproved order expiration, late SePay review and one-shot admin Stars refund request
-- [ ] Automatic reconciliation for approved-but-abandoned Stars checkout and full refund/customer dispute workflow
-- [ ] Shipping addresses, physical inventory, stock reservation, and fulfillment tracking
-- [x] Responsive Web Admin with server-side sessions, password auth, CSRF, throttling and audit trail
-- [ ] SSO/RBAC, mass inventory import and role-based approvals
-- [ ] payOS for **physical** goods; optional other compliant gateways
-- [ ] Backup/restore runbooks, monitoring, order export and operational alerting
-- [x] Vietnamese/English Telegram and Web Admin translations with persistent user preference
-- [ ] Localized product catalog fields, more languages, cart, coupons and referral
-- [ ] Integration tests on deployed staging using Telegram and SePay sandbox/test events
+## Documentation
+
+| Guide | Content |
+| --- | --- |
+| [Documentation index](docs/README.md) | Find guides by role/task |
+| [Getting started](docs/GETTING_STARTED.md) · [Tiếng Việt](docs/GETTING_STARTED.vi.md) | Set up a bot and first test order |
+| [Deployment](docs/DEPLOYMENT.md) | Cloudflare, Vercel, Railway, Render, Koyeb, Docker |
+| [Configuration](docs/CONFIGURATION.md) | Secrets, bank data, webhook URLs, migration checklist |
+| [Payments](docs/PAYMENTS.md) | Stars vs VietQR/SePay, idempotency, expiry/refunds |
+| [Commands](docs/COMMANDS.md) | Buyer and admin bot commands; Web Admin |
+| [Operations](docs/OPERATIONS.md) | Health checks, monitoring, backups, incident response |
+| [Roadmap](ROADMAP.md) | Current milestone, priorities and release gates |
+| [Contributing](CONTRIBUTING.md) · [AI rules](AGENTS.md) | Development conventions, PR expectations |
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md) and [SECURITY.md](SECURITY.md). PRs are welcome.
+Issues and Draft PRs are welcome. Run `npm run check`, `npm test`, and `npm run docs:check` before proposing changes. **Do not commit bot tokens, payment keys, production bank details, or customer inventory.** See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Released under the MIT License. © 2026 ePlus.DEV.
+MIT licensed — © ePlus.DEV. See [LICENSE](LICENSE).

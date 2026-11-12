@@ -19,6 +19,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Static check
         run: npm run check
+      - name: Documentation links
+        run: npm run docs:check
       - name: Test suite
         run: npm test
       - name: Docker image build
