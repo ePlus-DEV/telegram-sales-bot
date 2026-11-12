@@ -42,6 +42,14 @@ The new \`notification_outbox\` table keeps notification intents when a payment 
 
 Important: Telegram \`sendMessage\` has no idempotency key. A worker that crashes after Telegram accepted a message but before D1/Turso records \`SENT\` may still send a duplicate. The order state and key allocation remain idempotent. For digital goods, customers can always use \`/mykey ORDER_ID\` to fetch an already assigned key. **Unpaid invoice expiration and refund recovery are not yet implemented** and remain pre-production blockers.
 
+### Idempotent purchases and invoice recovery (issue #4)
+
+Apply migration `0003_purchase_intents.sql` before deploying this version: run `npm run db:migrate` for D1 or `npm run db:migrate:turso` for Turso. The `purchase_intents` table records one **callback_query.id → order** mapping in the same atomic database batch as the order and key reservation.
+
+Digital products use `createInvoiceLink` and persist the Telegram Stars invoice link. If the first message is lost, the buyer can use `/invoice ORDER_ID` to retrieve their own invoice (other buyers cannot). Repeated callbacks do not create extra orders or reserve extra keys. Only the first unique Stars `pre_checkout_query.id` can be approved for an order; retries of that **same query** are accepted until settlement.
+
+**Remaining limitation:** a first approved checkout that never completes remains locked to that query; issue #5 will add expiration and reconciliation. Users can place a separate new order with a new Buy callback; already-approved orders must be reconciled before inventory is released.
+
 ## What works
 
 | Feature | MVP |
@@ -49,7 +57,7 @@ Important: Telegram \`sendMessage\` has no idempotency key. A worker that crashe
 | Product catalog and inline Buy buttons | Yes |
 | Physical products: VietQR bank transfer | Yes |
 | SePay authenticated webhook and matching payment by unique order ID, bank account, and exact amount | Yes |
-| Digital products: Telegram Stars (XTR) invoices | Yes |
+| Digital products: Telegram Stars (XTR) invoice links | Yes |
 | Automatic delivery of one preloaded digital key after Stars payment | Yes |
 | Customer order history and re-fetch a delivered key | Yes |
 | Admin commands for products, keys, orders, and marking shipped physical orders complete | Yes |

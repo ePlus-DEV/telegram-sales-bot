@@ -1,4 +1,5 @@
-import { constantTimeEqual, createOrderId, validPositiveInt, sepayPayment, vietQrUrl, orderPaymentMatches } from './domain.js';
+import { constantTimeEqual, validPositiveInt, sepayPayment } from './domain.js';
+import { createPurchase, recoverInvoice, approvePrecheckout } from './purchase.js';
 import { enqueueNotification, flushNotifications } from './notifications.js';
 
 function json(value, status = 200) {
@@ -39,44 +40,6 @@ async function listOrders(env, chatId, userId, admin = false) {
   return send(env, chatId, rows.results.length
     ? rows.results.map(o => o.id + ' · ' + o.status + ' · ' + (o.kind === 'digital' ? o.total_stars + '⭐' : o.total_vnd + 'đ') + (admin ? ' · ' + o.user_id : '')).join('\n')
     : 'Chưa có đơn hàng.');
-}
-
-async function createPurchase(env, chatId, userId, productId) {
-  const p = await env.DB.prepare('SELECT * FROM products WHERE id=? AND active=1').bind(productId).first();
-  if (!p) return send(env, chatId, 'Không tìm thấy sản phẩm.');
-  const id = createOrderId();
-  if (p.kind === 'physical') {
-    if (!env.SEPAY_WEBHOOK_API_KEY || !env.BANK_ACCOUNT_NO) return send(env, chatId, 'Thanh toán ngân hàng chưa được cấu hình.');
-    await env.DB.prepare('INSERT INTO orders(id,user_id,product_id,kind,provider,total_vnd) VALUES(?,?,?,?,?,?)')
-      .bind(id, String(userId), p.id, 'physical', 'sepay', p.price_vnd).run();
-    const qr = vietQrUrl(env, id, p.price_vnd);
-    return send(env, chatId, 'Đơn ' + id + '\nSản phẩm: ' + p.name + '\nSố tiền: ' + p.price_vnd.toLocaleString('vi-VN') + 'đ'
-      + '\nNgân hàng BIN: ' + env.BANK_BIN + '\nSTK: ' + env.BANK_ACCOUNT_NO
-      + '\nNội dung bắt buộc: ' + id + '\nQR: ' + qr
-      + '\nChỉ chuyển khoản đúng số tiền và nội dung. Đơn được xử lý sau khi SePay xác nhận.');
-  }
-  // Reserve one item before issuing the Stars invoice, avoiding overselling inventory.
-  await env.DB.prepare('INSERT INTO orders(id,user_id,product_id,kind,provider,total_stars) VALUES(?,?,?,?,?,?)')
-    .bind(id, String(userId), p.id, 'digital', 'stars', p.price_stars).run();
-  const reservation = await env.DB.prepare(
-    'UPDATE digital_inventory SET reserved_order_id=? WHERE id=(SELECT id FROM digital_inventory WHERE product_id=? AND reserved_order_id IS NULL AND delivered_order_id IS NULL ORDER BY id LIMIT 1) AND reserved_order_id IS NULL'
-  ).bind(id, p.id).run();
-  if (!reservation.meta.changes) {
-    await env.DB.prepare('DELETE FROM orders WHERE id=? AND status=\'PENDING\'').bind(id).run();
-    return send(env, chatId, 'Sản phẩm đã hết hàng. Vui lòng thử lại sau.');
-  }
-  try {
-    return await telegram(env, 'sendInvoice', {
-      chat_id: chatId, title: p.name.slice(0, 32),
-      description: (p.description || p.name).slice(0, 255),
-      payload: id, provider_token: '', currency: 'XTR',
-      prices: [{ label: p.name.slice(0, 32), amount: p.price_stars }]
-    });
-  } catch (err) {
-    await env.DB.prepare('UPDATE digital_inventory SET reserved_order_id=NULL WHERE reserved_order_id=? AND delivered_order_id IS NULL').bind(id).run();
-    await env.DB.prepare('DELETE FROM orders WHERE id=? AND status=\'PENDING\'').bind(id).run();
-    throw err;
-  }
 }
 
 async function finishStars(env, message) {
@@ -171,8 +134,7 @@ async function adminCommand(env, chatId, text) {
 async function telegramUpdate(env, update) {
   if (update.pre_checkout_query) {
     const q = update.pre_checkout_query;
-    const order = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(q.invoice_payload).first();
-    const ok = q.currency === 'XTR' && orderPaymentMatches(order, q.from.id, q.total_amount, 'stars');
+    const ok = await approvePrecheckout(env,q);
     return telegram(env, 'answerPreCheckoutQuery', {
       pre_checkout_query_id: q.id, ok,
       ...(!ok ? { error_message: 'Đơn không hợp lệ hoặc đã được thanh toán. Vui lòng đặt lại.' } : {})
@@ -182,19 +144,31 @@ async function telegramUpdate(env, update) {
   if (message?.successful_payment) return finishStars(env, message);
   const callback = update.callback_query;
   if (callback) {
-    await telegram(env, 'answerCallbackQuery', { callback_query_id: callback.id });
+    // A transient acknowledgement failure must not lose the purchase.
+    try {
+      await telegram(env,'answerCallbackQuery',{callback_query_id:callback.id});
+    } catch (error) {
+      console.error('Callback acknowledgement failed:',error.message);
+    }
     const match = String(callback.data || '').match(/^buy:(\d+)$/);
-    if (match && callback.message?.chat?.id) return createPurchase(env, callback.message.chat.id, callback.from.id, Number(match[1]));
+    const chat = callback.message?.chat;
+    if (match && chat?.id && String(chat.id) === String(callback.from?.id)
+        && (!chat.type || chat.type === 'private')) {
+      return createPurchase(env,{
+        callbackId:callback.id,chatId:chat.id,userId:callback.from.id,productId:Number(match[1])
+      },telegram,send);
+    }
     return;
   }
   if (!message || message.chat?.type !== 'private') return;
   const chatId = message.chat.id;
   const userId = message.from?.id;
   const text = String(message.text || '').trim();
-  if (text === '/start') return send(env, chatId, '👋 Chào mừng đến ePlus Telegram Sales Bot!\n/catalog — Sản phẩm\n/orders — Đơn hàng\n/help — Trợ giúp');
-  if (text === '/help') return send(env, chatId, 'Lệnh: /catalog, /orders, /mykey MÃ_ĐƠN, /paysupport.\nSản phẩm số thanh toán bằng Telegram Stars. Hàng vật lý dùng QR ngân hàng và SePay.');
+  if (text === '/start') return send(env, chatId, '👋 Chào mừng đến ePlus Telegram Sales Bot!\n/catalog — Sản phẩm\n/orders — Đơn hàng\n/invoice MÃ_ĐƠN — Link Stars\n/help — Trợ giúp');
+  if (text === '/help') return send(env, chatId, 'Lệnh: /catalog, /orders, /invoice MÃ_ĐƠN, /mykey MÃ_ĐƠN, /paysupport.\nSản phẩm số thanh toán bằng Telegram Stars. Hàng vật lý dùng QR ngân hàng và SePay.');
   if (text === '/catalog' || text === '/products') return catalog(env, chatId);
   if (text === '/orders') return listOrders(env, chatId, userId);
+  if (text.startsWith('/invoice ')) return recoverInvoice(env,chatId,userId,text.slice(9),telegram,send);
   if (text.startsWith('/mykey ')) {
     const id = text.slice(7).trim();
     const item = await env.DB.prepare("SELECT i.secret_value FROM orders o JOIN digital_inventory i ON i.delivered_order_id=o.id WHERE o.id=? AND o.user_id=? AND o.status='FULFILLED'").bind(id,String(userId)).first();
