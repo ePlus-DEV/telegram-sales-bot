@@ -53,7 +53,7 @@ export function loginPage(error=''){
   + '<button type="submit">Đăng nhập</button></form></section>'
   + '<p class="footer">Kết nối được bảo vệ bằng HTTPS và phiên đăng nhập HttpOnly.</p></main>');
 }
-function tab(id,label,current){return '<a href="/admin?tab='+id+'" '+(id===current?'aria-current="page"':'')+'>'+label+'</a>';}
+function navTab(id,label,current){return '<a href="/admin?tab='+id+'" '+(id===current?'aria-current="page"':'')+'>'+label+'</a>';}
 function stockForm(product,csrf){
   return '<form class="rowform" method="post" action="/admin/stock/add">'+hidden(csrf)
     + '<input type="hidden" name="product_id" value="'+product.id+'">'
@@ -127,8 +127,8 @@ export function dashboardPage(data,session,tab='overview',flash='') {
       .map(([label,value])=>'<div class="stat"><div class="mini">'+label+'</div><div class="number">'+money(value)+'</div></div>').join('')
     +'</div>';
   const navigation='<nav aria-label="Điều hướng quản trị">'
-    +tab('overview','Tổng quan',tab)+tab('products','Sản phẩm & Kho',tab)
-    +tab('orders','Đơn hàng',tab)+tab('reviews','Đối soát',tab)+'</nav>';
+    +navTab('overview','Tổng quan',tab)+navTab('products','Sản phẩm & Kho',tab)
+    +navTab('orders','Đơn hàng',tab)+navTab('reviews','Đối soát',tab)+'</nav>';
   const info='<section class="panel"><h2>Tình trạng cửa hàng</h2><p class="help">Các khoản tiền vẫn phải được xác minh qua webhook và ledger. '
     +'Không thể hoàn tiền hoặc sửa số dư bằng thao tác dashboard. Quản trị viên cần xử lý các ca ngoại lệ ở mục Đối soát.</p></section>';
   const section=tab==='products'?renderProducts(data.products,session.csrf_token)
