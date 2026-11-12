@@ -7,6 +7,7 @@ import {page,loginPage,dashboardPage} from './ui.js';
 import {validPositiveInt} from '../domain.js';
 import {adminLanguage,normalizeLanguage} from '../i18n.js';
 import {a} from './locales.js';
+import {queryOptions,listProducts,listAdminOrders,adminSummary,recentAudit,inventoryExport} from './data.js';
 
 const headers={'cache-control':'no-store, private','referrer-policy':'no-referrer'};
 function redirect(location,extra={}) {
@@ -23,41 +24,24 @@ function validText(value,max) {
 async function audit(env,action,target) {
   await env.DB.prepare('INSERT INTO admin_audit(action,target_id) VALUES(?,?)').bind(action,String(target)).run();
 }
-async function count(env,sql) {
-  return Number((await env.DB.prepare(sql).first())?.n||0);
-}
-async function dashboardData(env) {
-  const stats={
-    products:await count(env,"SELECT COUNT(*) AS n FROM products WHERE active=1"),
-    pending:await count(env,"SELECT COUNT(*) AS n FROM orders WHERE status='PAID' AND kind='physical'"),
-    keys:await count(env,"SELECT COUNT(*) AS n FROM digital_inventory WHERE reserved_order_id IS NULL AND delivered_order_id IS NULL"),
-    reviews:await count(env,"SELECT COUNT(*) AS n FROM bank_payment_reviews WHERE acknowledged_at IS NULL")
-  };
-  const products=(await env.DB.prepare(
-    'SELECT p.id,p.name,p.description,p.kind,p.price_vnd,p.price_stars,p.active,'
-    + '(SELECT COUNT(*) FROM digital_inventory d WHERE d.product_id=p.id) AS total_keys,'
-    + '(SELECT COUNT(*) FROM digital_inventory d WHERE d.product_id=p.id AND d.reserved_order_id IS NULL AND d.delivered_order_id IS NULL) AS ready_keys '
-    + 'FROM products p ORDER BY p.id DESC LIMIT 50'
-  ).all()).results;
-  const orders=(await env.DB.prepare(
-    'SELECT o.id,o.user_id,o.kind,o.total_vnd,o.total_stars,o.status,o.created_at,'
-    + "CASE WHEN r.state='CONFIRMED' THEN 'REFUNDED' "
-    + "WHEN r.state IS NOT NULL THEN 'REFUND_'||r.state "
-    + "WHEN e.order_id IS NOT NULL AND o.status='PENDING' THEN 'EXPIRED' "
-    + 'ELSE o.status END AS display_status '
-    + 'FROM orders o LEFT JOIN order_expirations e ON e.order_id=o.id '
-    + 'LEFT JOIN star_refunds r ON r.order_id=o.id ORDER BY o.created_at DESC LIMIT 50'
-  ).all()).results;
-  const banks=(await env.DB.prepare(
+async function dashboardData(env,tab,opts) {
+  const stats=await adminSummary(env);
+  const products=tab==='products'?await listProducts(env,opts):null;
+  const orders=(tab==='orders'||tab==='overview')
+    ?await listAdminOrders(env,tab==='overview'?{q:'',kind:'',active:'',status:'',provider:'',page:1}:opts)
+    :null;
+  const banks=tab==='reviews'?(await env.DB.prepare(
     'SELECT event_id,order_id,amount_vnd,reason FROM bank_payment_reviews '
     + 'WHERE acknowledged_at IS NULL ORDER BY received_at ASC LIMIT 30'
-  ).all()).results;
-  const refunds=(await env.DB.prepare(
+  ).all()).results:[];
+  const refunds=tab==='reviews'?(await env.DB.prepare(
     "SELECT order_id,state,requested_at FROM star_refunds WHERE state!='CONFIRMED' "
     + 'ORDER BY requested_at ASC LIMIT 30'
-  ).all()).results;
-  return {stats,products,orders,banks,refunds};
+  ).all()).results:[];
+  const audit=tab==='audit'?await recentAudit(env,50):[];
+  return {stats,products,orders,banks,refunds,audit,filters:opts};
 }
+
 async function writeAction(env,path,form) {
   if(path==='/admin/products/create'||path==='/admin/products/update') {
     const kind=path.endsWith('/create')?String(form.get('kind')||''):null;
@@ -90,13 +74,38 @@ async function writeAction(env,path,form) {
     }
     return '/admin?tab=products&notice=saved';
   }
+  if(path==='/admin/stock/bulk') {
+    const id=validPositiveInt(form.get('product_id'));
+    const raw=String(form.get('keys')||'');
+    if(!id||raw.length>12000)throw new Error('Invalid bulk inventory payload');
+    const entries=raw.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+    if(!entries.length||entries.length>50||entries.some(x=>x.length>200))
+      throw new Error('Bulk import accepts 1–50 keys of up to 200 characters each');
+    if(new Set(entries).size!==entries.length)throw new Error('Duplicate key in submitted batch');
+    const product=await env.DB.prepare(
+      "SELECT id FROM products WHERE id=? AND kind='digital'"
+    ).bind(id).first();
+    if(!product)throw new Error('Product not digital');
+    const operations=entries.map(key=>env.DB.prepare(
+      'INSERT INTO digital_inventory(product_id,secret_value) '
+      + 'SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM digital_inventory WHERE product_id=? AND secret_value=?)'
+    ).bind(id,key,id,key));
+    const applied=await env.DB.batch(operations);
+    const added=applied.reduce((count,result)=>count+Number(result.meta?.changes||0),0);
+    // Never echo, log or audit raw keys. Only counts and product IDs are retained.
+    await audit(env,'STOCK_BULK_ADD',id+':'+added);
+    return '/admin?tab=products&notice=imported';
+  }
   if(path==='/admin/stock/add') {
     const id=validPositiveInt(form.get('product_id'));
     const key=validText(form.get('key'),2000);
     if(!id||!key)throw new Error('Invalid inventory');
     const p=await env.DB.prepare("SELECT id FROM products WHERE id=? AND kind='digital'").bind(id).first();
     if(!p)throw new Error('No digital product');
-    await env.DB.prepare('INSERT INTO digital_inventory(product_id,secret_value) VALUES(?,?)').bind(id,key).run();
+    await env.DB.prepare(
+      'INSERT INTO digital_inventory(product_id,secret_value) '
+      + 'SELECT ?,? WHERE NOT EXISTS (SELECT 1 FROM digital_inventory WHERE product_id=? AND secret_value=?)'
+    ).bind(id,key,id,key).run();
     await audit(env,'STOCK_ADD',id); // Never log key values.
     return '/admin?tab=products&notice=saved';
   }
@@ -164,13 +173,33 @@ export async function handleAdminRequest(request,env) {
       return fail('Dữ liệu không hợp lệ hoặc thao tác không được phép',400);
     }
   }
+  if(path==='/admin/export/inventory.csv') {
+    const session=await readSession(env,request);
+    if(!session)return fail('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.',401);
+    const rows=await inventoryExport(env);
+    // Intentionally numeric aggregates and controlled enum only; never keys
+    // or product/customer-provided strings (CSV formula injection risk).
+    const csv='product_id,kind,total,available,reserved,delivered\r\n'
+      + rows.map(row=>[
+        Number(row.id),row.kind,
+        Number(row.total||0),Number(row.available||0),
+        Number(row.reserved||0),Number(row.delivered||0)
+      ].join(',')).join('\r\n')+'\r\n';
+    return new Response(csv,{headers:{
+      'content-type':'text/csv; charset=utf-8',
+      'cache-control':'no-store, private',
+      'content-disposition':'attachment; filename="inventory-summary.csv"',
+      'x-content-type-options':'nosniff',
+      'referrer-policy':'no-referrer'
+    }});
+  }
   if(path!=='/admin'&&path!=='/admin/login')return fail('Not found',404);
   const session=await readSession(env,request);
   if(!session)return persistLocale(loginPage('',lang));
   if(path==='/admin/login')return redirect('/admin?lang='+lang);
   const requested=url.searchParams.get('tab')||'overview';
-  const tab=['overview','products','orders','reviews'].includes(requested)?requested:'overview';
-  const notices={saved:'Đã lưu thay đổi.',fulfilled:'Đã đánh dấu đơn hoàn tất. Hãy xác nhận khách đã nhận hàng.',reviewed:'Đã ghi nhận đối soát; không tự hoàn tiền.'};
+  const tab=['overview','products','orders','reviews','audit'].includes(requested)?requested:'overview';
+  const notices={saved:'Đã lưu thay đổi.',imported:'Đã nhập các key mới hợp lệ; key trùng hiện có được bỏ qua.',fulfilled:'Đã đánh dấu đơn hoàn tất. Hãy xác nhận khách đã nhận hàng.',reviewed:'Đã ghi nhận đối soát; không tự hoàn tiền.'};
   const flash=a(lang,notices[url.searchParams.get('notice')]||'');
-  return persistLocale(dashboardPage(await dashboardData(env),session,tab,flash,lang));
+  return persistLocale(dashboardPage(await dashboardData(env,tab,queryOptions(url.searchParams)),session,tab,flash,lang));
 }

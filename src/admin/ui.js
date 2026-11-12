@@ -1,4 +1,5 @@
 import {translateAdminHtml,a} from './locales.js';
+import {filterToolbar,pagination,bulkImportForm,auditView} from './views.js';
 // Intentionally no browser JavaScript: all mutations use server-side POST,
 // CSRF tokens, strict Content Security Policy and HTML escaping.
 export function html(value) {
@@ -15,6 +16,11 @@ nav{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 26px}nav a{padding:9px 16p
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:16px 0 24px}.stat,.panel{border:1px solid var(--border);border-radius:16px;background:var(--surface);box-shadow:var(--shadow)}.stat{padding:18px}.number{font-size:29px;font-weight:800;letter-spacing:-.04em;margin-top:6px}.panel{padding:22px;margin:15px 0}.panelhead{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:18px}.panel h2{font-size:17px;letter-spacing:-.015em}.mini{color:var(--muted);font-size:12px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}label{display:grid;gap:6px;color:var(--muted);font-size:12px;font-weight:650}input,select,textarea{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:10px 12px;width:100%;font:inherit;min-width:0}input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(--primary);outline-offset:2px}button,.button{background:var(--primary);border:0;border-radius:10px;padding:10px 16px;color:#fff;font:inherit;font-weight:700;cursor:pointer;white-space:nowrap}.secondary{background:transparent;color:var(--text);border:1px solid var(--border)}.danger{color:#d55059}.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.full{grid-column:1/-1}.help{font-size:12px;color:var(--muted);margin-top:8px}.tablewrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:580px;text-align:left}th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:10px 12px;border-bottom:1px solid var(--border)}td{padding:12px;border-bottom:1px solid var(--border);vertical-align:middle}td code{font-size:12px}tbody tr:last-child td{border-bottom:0}.pill{display:inline-block;border-radius:99px;padding:3px 9px;background:var(--bg);border:1px solid var(--border);font-size:11px;font-weight:700}.good{color:var(--positive)}.warning{color:var(--warn)}.muted{color:var(--muted)}.flash{padding:12px 15px;margin:0 0 18px;border:1px solid var(--border);border-left:3px solid var(--primary);border-radius:10px;background:var(--surface)}.login{max-width:400px;margin:10vh auto}.login .panel{padding:30px}.login h1{margin:12px 0}.login form{display:grid;gap:16px}.footer{margin-top:24px;color:var(--muted);font-size:12px}.tablinks{display:flex;align-items:center;gap:10px}.rowform{display:flex;gap:6px;align-items:center}.rowform input{max-width:100px}
 @media(max-width:850px){.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:570px){.shell{padding:18px 13px 48px}.top{align-items:flex-start}.heading{font-size:19px}.panel{padding:16px}.stats{gap:8px}.stat{padding:14px}.number{font-size:24px}.grid,.grid.two{grid-template-columns:1fr}.tablewrap{margin:0 -5px}.login{margin:5vh auto}}
 `;
+// Search and paging controls are accessible without client-side JavaScript.
+const filterStyles = '.filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:end}'
+  +'.filters .actions{align-self:end}.pager{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;flex-wrap:wrap}'
+  +'@media(max-width:900px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}}'
+  +'@media(max-width:550px){.filters{grid-template-columns:1fr}}';
 const headers = {
   'content-type':'text/html; charset=utf-8',
   'cache-control':'no-store, private',
@@ -27,7 +33,7 @@ const headers = {
 export function page(body,{status=200,extraHeaders={},lang='vi'}={}) {
   return new Response('<!doctype html><html lang="'+(lang==='en'?'en':'vi')+'"><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">'
-    + '<title>ePlus Sales · Admin</title><style>'+styles+'</style></head><body>'+translateAdminHtml(lang,body)+'</body></html>',
+    + '<title>ePlus Sales · Admin</title><style>'+styles+filterStyles+'</style></head><body>'+translateAdminHtml(lang,body)+'</body></html>',
     {status,headers:{...headers,...extraHeaders}});
 }
 function hidden(csrf){return '<input type="hidden" name="csrf" value="'+html(csrf)+'">';}
@@ -64,7 +70,7 @@ function stockForm(product,csrf){
     + '<input aria-label="Key mới cho '+html(product.name)+'" required name="key" placeholder="Key mới" maxlength="2000" autocomplete="off">'
     + '<button class="secondary" type="submit">Nhập</button></form>';
 }
-function renderProducts(products,csrf,lang='vi'){
+function renderProducts(products,csrf,lang='vi',listing=null,filters=null){
   const rows=products.map(p=>{
     const total=Number(p.total_keys||0),ready=Number(p.ready_keys||0);
     const price=p.kind==='digital'?p.price_stars:p.price_vnd;
@@ -91,14 +97,19 @@ function renderProducts(products,csrf,lang='vi'){
     +input('Giá (VND hoặc Stars theo loại)','price','','number','required min="1" max="999999999"',lang)
     +'<label class="full">Mô tả<textarea name="description" rows="2" maxlength="240" placeholder="Mô tả hiển thị cho khách"></textarea></label>'
     +'<div><button>Tạo sản phẩm</button></div></form></section>'
-    +'<section class="panel"><div class="panelhead"><h2>Sản phẩm & kho</h2><span class="mini">Hiển thị tối đa 50 mục</span></div>'
+    +filterToolbar('products',filters)
+    +'<section class="panel"><div class="panelhead"><h2>Sản phẩm & kho</h2><span class="mini">Danh sách có phân trang</span></div>'
     +'<div class="tablewrap"><table><thead><tr><th>Sản phẩm</th><th>Loại</th><th>Giá</th><th>Kho</th><th>Trạng thái</th></tr></thead><tbody>'
-    +(rows||'<tr><td colspan="5" class="muted">Chưa có sản phẩm</td></tr>')+'</tbody></table></div></section>'
+    +(rows||'<tr><td colspan="5" class="muted">Chưa có sản phẩm</td></tr>')+'</tbody></table></div>'
+    +pagination('products',listing,filters)+'</section>'
+    +'<p class="help"><a href="/admin/export/inventory.csv">Xuất báo cáo tồn kho CSV (chỉ số lượng)</a></p>'
+    +bulkImportForm(csrf)
     +'<section><h2 style="margin:22px 0">Chỉnh sửa & nhập key</h2>'+edit
     +'<p class="help">Mã key không được hiện lại trên dashboard sau khi nhập. Tránh nhập tài khoản hoặc thông tin không được phép phân phối.</p></section>';
 }
-function renderOrders(orders,csrf,lang='vi'){
-  return '<section class="panel"><div class="panelhead"><h2>Đơn hàng gần đây</h2><span class="mini">Tối đa 50 đơn · Không hiển thị nội dung key</span></div>'
+function renderOrders(orders,csrf,lang='vi',listing=null,filters=null){
+  return (listing?filterToolbar('orders',filters):'')
+    +'<section class="panel"><div class="panelhead"><h2>Đơn hàng gần đây</h2><span class="mini">Không hiển thị nội dung key</span></div>'
     +'<div class="tablewrap"><table><thead><tr><th>Đơn</th><th>Khách Telegram</th><th>Loại</th><th>Số tiền</th><th>Trạng thái / thao tác</th></tr></thead><tbody>'
     +(orders.map(o=>'<tr><td><code>'+html(o.id)+'</code><div class="mini">'+html(o.created_at)+'</div></td>'
       +'<td><code>'+html(o.user_id)+'</code></td><td>'+html(a(lang,kindText[o.kind]))+'</td>'
@@ -109,7 +120,8 @@ function renderOrders(orders,csrf,lang='vi'){
         +'<input type="hidden" name="order_id" value="'+html(o.id)+'">'
         +'<button type="submit" class="secondary">Đánh dấu đã giao</button></form>':'')+'</td></tr>').join('')
       ||'<tr><td colspan="5" class="muted">Chưa có đơn hàng</td></tr>')
-    +'</tbody></table></div><p class="help">Đánh dấu đã giao chỉ cập nhật đơn; liên hệ khách để xác nhận việc giao hàng thực tế.</p></section>';
+    +'</tbody></table></div>'+(listing?pagination('orders',listing,filters):'')
+    +'<p class="help">Đánh dấu đã giao chỉ cập nhật đơn; liên hệ khách để xác nhận việc giao hàng thực tế.</p></section>';
 }
 function renderReviews(banks,refunds,csrf,lang='vi'){
   return '<section class="panel"><div class="panelhead"><h2>Giao dịch ngân hàng cần đối soát</h2><span class="mini">Không tự hoàn hoặc ghi có tiền</span></div>'
@@ -129,16 +141,24 @@ export function dashboardPage(data,session,tab='overview',flash='',lang='vi') {
   const stats='<div class="stats">'
     +[['Sản phẩm',data.stats.products],['Đơn cần xử lý',data.stats.pending],['Key sẵn',data.stats.keys],['Đối soát',data.stats.reviews]]
       .map(([label,value])=>'<div class="stat"><div class="mini">'+label+'</div><div class="number">'+money(value)+'</div></div>').join('')
-    +'</div>';
+    +'</div>'
+    +'<div class="stats">'
+    +[['Ghi nhận VND',data.stats.sepayVnd],['Ghi nhận Stars',data.stats.stars],
+      ['Đơn đã ghi nhận thanh toán',data.stats.paidOrders],['Thông báo đang chờ',data.stats.alerts]]
+      .map(([label,value])=>'<div class="stat"><div class="mini">'+label+'</div>'
+        +'<div class="number">'+money(value)+'</div></div>').join('')+'</div>'
+    +'<p class="help">Số liệu cộng dồn từ đơn đã ghi nhận thanh toán; đã loại các refund Stars được xác nhận. '
+    +'Chưa phải doanh thu kế toán hoặc số dư nhà cung cấp.</p>';
   const navigation='<nav aria-label="Điều hướng quản trị">'
     +navTab('overview','Tổng quan',tab)+navTab('products','Sản phẩm & Kho',tab)
-    +navTab('orders','Đơn hàng',tab)+navTab('reviews','Đối soát',tab)+'</nav>';
+    +navTab('orders','Đơn hàng',tab)+navTab('reviews','Đối soát',tab)+navTab('audit','Nhật ký',tab)+'</nav>';
   const info='<section class="panel"><h2>Tình trạng cửa hàng</h2><p class="help">Các khoản tiền vẫn phải được xác minh qua webhook và ledger. '
     +'Không thể hoàn tiền hoặc sửa số dư bằng thao tác dashboard. Quản trị viên cần xử lý các ca ngoại lệ ở mục Đối soát.</p></section>';
-  const section=tab==='products'?renderProducts(data.products,session.csrf_token,lang)
-    :tab==='orders'?renderOrders(data.orders,session.csrf_token,lang)
+  const section=tab==='products'?renderProducts(data.products.records,session.csrf_token,lang,data.products,data.filters)
+    :tab==='orders'?renderOrders(data.orders.records,session.csrf_token,lang,data.orders,data.filters)
     :tab==='reviews'?renderReviews(data.banks,data.refunds,session.csrf_token,lang)
-    :info+renderOrders(data.orders.slice(0,10),session.csrf_token,lang);
+    :tab==='audit'?auditView(data.audit)
+    :info+renderOrders(data.orders.records.slice(0,10),session.csrf_token,lang);
   const logout='<form method="post" action="/admin/logout" class="actions" style="margin-top:18px">'
     +hidden(session.csrf_token)+'<button type="submit" class="secondary">Đăng xuất phiên này</button></form>';
   return page(layout('Bảng điều khiển',navigation+stats

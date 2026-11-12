@@ -17,7 +17,7 @@
 | Payments | VietQR + authenticated SePay webhook for **physical** orders; Stars invoices for **digital** orders | payOS/MoMo/VNPay; provider E2E certification |
 | Reliability | Payment event deduplication, notification outbox, safe unapproved-order expiry, manual reconciliation | Full abandoned-checkout/refund/dispute recovery |
 | Digital delivery | Preloaded key reservation, one-key fulfillment, customer key retrieval | Encrypted inventory, bulk key import |
-| Web Admin | Password login, session/CSRF protection, products, single-key intake, orders, bank review | SSO/RBAC, richer analytics, export |
+| Web Admin | Password login, server-side search/filters/pagination, product CRUD, bulk key intake, audit log, recorded-payment metrics, safe stock-count CSV | SSO/RBAC, physical stock/shipments, accounting-grade analytics |
 | Languages | Vietnamese / English for bot and admin; saved Telegram preference | Translated product fields, more locales |
 
 The current implementation is **not** a hosted store or a production guarantee. Product titles and descriptions are supplied by the shop owner and are not automatically translated.
@@ -72,7 +72,8 @@ Read [payment flows & limitations](docs/PAYMENTS.md), [security policy](SECURITY
 | [Deployment](docs/DEPLOYMENT.md) | Cloudflare, Vercel, Railway, Render, Koyeb, Docker |
 | [Configuration](docs/CONFIGURATION.md) | Secrets, bank data, webhook URLs, migration checklist |
 | [Payments](docs/PAYMENTS.md) | Stars vs VietQR/SePay, idempotency, expiry/refunds |
-| [Commands](docs/COMMANDS.md) | Buyer and admin bot commands; Web Admin |
+| [Commands](docs/COMMANDS.md) | Buyer and admin bot commands |
+| [Web Admin guide](docs/ADMIN.md) | Search, filters, stock intake/export, audits, metrics and permissions |
 | [Operations](docs/OPERATIONS.md) | Health checks, monitoring, backups, incident response |
 | [Staging validation](docs/STAGING_VALIDATION.md) | Offline migrations, webhook/Admin smoke tests and protected manual staging workflow |
 | [Roadmap](ROADMAP.md) | Current milestone, priorities and release gates |
