@@ -28,3 +28,8 @@ Do not enable live transactions until a security and operations review is comple
 - Mutations require CSRF token and Origin validation, parameterized SQL, and append-only audit events without sensitive payloads.
 - Login attempts are throttled per edge IP when available and globally otherwise; consider identity-aware proxy/SSO for production.
 - No raw credentials are rendered in HTML, but digital inventory remains plaintext in D1/Turso until encryption-at-rest and key rotation are implemented.
+
+## Language preferences
+- The Telegram locale table stores only user ID, language and auto/manual source. It must not store credentials or payment data.
+- Admin's language cookie carries only `vi` or `en`; it is never an authorization token. Keep session/CSRF protections independent of language.
+- Translated payment strings must not alter the bank memo, Stars amount, user IDs or refund authorization/processing.

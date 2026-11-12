@@ -91,3 +91,13 @@ const en = {
 export function a(language,source) {
   return normalizeLanguage(language)==='en' ? (en[source]||source):source;
 }
+
+export function translateAdminHtml(language,markup) {
+  if(normalizeLanguage(language)!=='en')return markup;
+  // Translate server-authored markup; dynamic names/descriptions are escaped
+  // with numeric entities for non-ASCII characters before this translation.
+  let output=markup;
+  for(const [source,translated] of Object.entries(en).sort((a,b)=>b[0].length-a[0].length))
+    if(source!==translated)output=output.replaceAll(source,translated);
+  return output;
+}

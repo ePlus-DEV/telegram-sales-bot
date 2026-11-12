@@ -145,3 +145,9 @@ After running migration `0005_web_admin.sql` (with the same D1/Turso migration c
 Open `https://YOUR_DEPLOYED_DOMAIN/admin`. The page redirects to a server-verified password login and uses a database session and CSRF. A missing/weak secret disables `/admin` with 503, not a default administrator account. Use HTTPS for cookies. Session expires after 8 hours; logout invalidates it immediately.
 
 The UI handles product CRUD, one-by-one digital-key intake, physical order fulfillment and **review-only** bank/Stars reconciliation. This is the first secure admin MVP, not a full production ERP. There is no automatic shipping notice for a fulfillment action; the operator must confirm shipment with the customer. Never configure production admin/password secrets on public Vercel preview deployments.
+
+## Languages
+
+Apply migration `0006_locales.sql` before upgrading the bot. Telegram auto-detects `from.language_code` for English/Vietnamese and stores a manual choice via `/language`, `/lang vi`, or `/lang en` in the same durable D1/Turso database. Other Telegram locales default to Vietnamese.
+
+Web Admin `/admin?lang=en` switches to English (or `/admin?lang=vi` to Vietnamese) and saves only the language in an admin-scoped Secure cookie. The existing session cookie and CSRF checks are unchanged. Product titles/descriptions are entered by the owner and are not machine-translated.

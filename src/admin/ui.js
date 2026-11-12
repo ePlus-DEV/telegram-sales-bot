@@ -1,9 +1,10 @@
+import {translateAdminHtml} from './locales.js';
 // Intentionally no browser JavaScript: all mutations use server-side POST,
 // CSRF tokens, strict Content Security Policy and HTML escaping.
 export function html(value) {
-  return String(value??'').replace(/[&<>"']/g,c=>({
+  return String(value??'').replace(/[&<>"']|[^\x00-\x7F]/gu,c=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  })[c]);
+  })[c]||'&#x'+c.codePointAt(0).toString(16)+';');
 }
 const styles = `
 :root{color-scheme:light dark;--bg:#f4f6fb;--surface:#fff;--text:#17212f;--muted:#667085;--border:#e4e7ec;--primary:#2563eb;--dark:#142032;--positive:#067647;--warn:#b45309;--shadow:0 10px 30px rgba(15,23,42,.05)}
@@ -23,10 +24,10 @@ const headers = {
   'referrer-policy':'no-referrer',
   'permissions-policy':'camera=(), microphone=(), geolocation=()'
 };
-export function page(body,{status=200,extraHeaders={}}={}) {
-  return new Response('<!doctype html><html lang="vi"><head><meta charset="utf-8">'
+export function page(body,{status=200,extraHeaders={},lang='vi'}={}) {
+  return new Response('<!doctype html><html lang="'+(lang==='en'?'en':'vi')+'"><head><meta charset="utf-8">'
     + '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">'
-    + '<title>ePlus Sales · Admin</title><style>'+styles+'</style></head><body>'+body+'</body></html>',
+    + '<title>ePlus Sales · Admin</title><style>'+styles+'</style></head><body>'+translateAdminHtml(lang,body)+'</body></html>',
     {status,headers:{...headers,...extraHeaders}});
 }
 function hidden(csrf){return '<input type="hidden" name="csrf" value="'+html(csrf)+'">';}
@@ -41,17 +42,20 @@ function layout(title,body){
   return '<div class="shell"><header class="top"><div class="brand"><div class="logo">e+</div><div>'
     + '<div class="eyebrow">ePlus.DEV / Commerce</div><div class="heading">'+html(title)+'</div>'
     + '<div class="subtitle">Telegram Sales Bot · Self-hosted</div></div></div>'
-    + '<form action="/admin/logout" method="post" id="logout-form"></form></header>'+body
+    + '<div class="tablinks" aria-label="Language">'
+    + '<a href="/admin?lang=vi" lang="vi">🇻🇳 Tiếng Việt</a>'
+    + '<a href="/admin?lang=en" lang="en">🇬🇧 English</a></div></header>'+body
     + '<footer class="footer">Bảng quản trị dành riêng cho chủ cửa hàng. Không lưu token hoặc mật khẩu trong giao diện.</footer></div>';
 }
-export function loginPage(error=''){
+export function loginPage(error='',lang='vi'){
   return page('<main class="login"><div class="brand"><div class="logo">e+</div><div><div class="eyebrow">ePlus.DEV</div><div class="heading">Sales Admin</div></div></div>'
   + '<section class="panel"><h1>Đăng nhập quản trị</h1><p class="subtitle">Sử dụng mật khẩu quản trị được cấu hình trên hosting.</p>'
   + (error?'<p class="flash" role="alert">'+html(error)+'</p>':'')
-  + '<form action="/admin/login" method="post"><label>Mật khẩu quản trị'
+  + '<div class="tablinks" style="margin:14px 0"><a href="/admin?lang=vi">🇻🇳 Tiếng Việt</a><a href="/admin?lang=en">🇬🇧 English</a></div>'
+  + '<form action="/admin/login?lang='+lang+'" method="post"><label>Mật khẩu quản trị'
   + '<input type="password" name="password" autocomplete="current-password" required minlength="16" maxlength="1024"></label>'
   + '<button type="submit">Đăng nhập</button></form></section>'
-  + '<p class="footer">Kết nối được bảo vệ bằng HTTPS và phiên đăng nhập HttpOnly.</p></main>');
+  + '<p class="footer">Kết nối được bảo vệ bằng HTTPS và phiên đăng nhập HttpOnly.</p></main>',{lang});
 }
 function navTab(id,label,current){return '<a href="/admin?tab='+id+'" '+(id===current?'aria-current="page"':'')+'>'+label+'</a>';}
 function stockForm(product,csrf){
@@ -121,7 +125,7 @@ function renderReviews(banks,refunds,csrf){
       ||'<tr><td colspan="3" class="muted">Không có yêu cầu cần xác minh</td></tr>')
     +'</tbody></table></div></section>';
 }
-export function dashboardPage(data,session,tab='overview',flash='') {
+export function dashboardPage(data,session,tab='overview',flash='',lang='vi') {
   const stats='<div class="stats">'
     +[['Sản phẩm',data.stats.products],['Đơn cần xử lý',data.stats.pending],['Key sẵn',data.stats.keys],['Đối soát',data.stats.reviews]]
       .map(([label,value])=>'<div class="stat"><div class="mini">'+label+'</div><div class="number">'+money(value)+'</div></div>').join('')
@@ -138,5 +142,5 @@ export function dashboardPage(data,session,tab='overview',flash='') {
   const logout='<form method="post" action="/admin/logout" class="actions" style="margin-top:18px">'
     +hidden(session.csrf_token)+'<button type="submit" class="secondary">Đăng xuất phiên này</button></form>';
   return page(layout('Bảng điều khiển',navigation+stats
-    +(flash?'<div class="flash" role="status">'+html(flash)+'</div>':'')+section+logout));
+    +(flash?'<div class="flash" role="status">'+html(flash)+'</div>':'')+section+logout),{lang});
 }

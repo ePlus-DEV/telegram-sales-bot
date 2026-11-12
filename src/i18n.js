@@ -195,3 +195,12 @@ export function adminLanguage(request) {
     .split(';').map(x=>x.trim()).find(x=>x.startsWith('eplus_admin_lang='));
   return normalizeLanguage(query)||normalizeLanguage(cookie?.slice('eplus_admin_lang='.length))||'vi';
 }
+
+export function statusLabel(language,status) {
+  const labels={
+    vi:{PENDING:'Chờ thanh toán',PAID:'Đã thanh toán',FULFILLED:'Hoàn tất',EXPIRED:'Hết hạn',REFUNDED:'Đã hoàn tiền'},
+    en:{PENDING:'Pending payment',PAID:'Paid',FULFILLED:'Fulfilled',EXPIRED:'Expired',REFUNDED:'Refunded'}
+  };
+  const locale=normalizeLanguage(language)||'vi';
+  return labels[locale][status]||status;
+}

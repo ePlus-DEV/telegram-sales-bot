@@ -3,7 +3,7 @@ import { createPurchase, recoverInvoice, approvePrecheckout } from './purchase.j
 import { enqueueNotification, flushNotifications } from './notifications.js';
 import { expirePendingOrders, recordBankReview, listBankReviews, acknowledgeBankReview, listRefundReviews, refundPaidStars } from './reconciliation.js';
 import { handleAdminRequest } from './admin/handler.js';
-import {t,money,languageFor,languageForId,setLanguage} from './i18n.js';
+import {t,money,languageFor,languageForId,setLanguage,statusLabel} from './i18n.js';
 
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -28,7 +28,7 @@ async function catalog(env, chatId, lang) {
   if (!rows.results.length) return send(env, chatId,t(lang,'noProducts'));
   await send(env, chatId,t(lang,'catalogTitle'));
   for (const p of rows.results) {
-    const price = p.kind === 'digital' ? p.price_stars + ' ⭐' : money(lang,p.price_vnd) + 'đ';
+    const price = p.kind === 'digital' ? p.price_stars + ' ⭐' : money(lang,p.price_vnd) + (lang==='en'?' VND':'đ');
     await send(env, chatId, '#' + p.id + ' · ' + p.name + '\n' + p.description + '\n' + price, {
       reply_markup: { inline_keyboard: [[{ text: t(lang,'buy'), callback_data: 'buy:' + p.id }]] }
     });
@@ -48,7 +48,7 @@ async function listOrders(env, chatId, userId, admin = false, lang='vi') {
     : env.DB.prepare(projection+'WHERE o.user_id=? ORDER BY o.created_at DESC LIMIT 10').bind(String(userId));
   const rows = await stmt.all();
   return send(env, chatId, rows.results.length
-    ? rows.results.map(o => o.id + ' · ' + o.display_status + ' · ' + (o.kind === 'digital' ? o.total_stars + '⭐' : o.total_vnd + 'đ') + (admin ? ' · ' + o.user_id : '')).join('\n')
+    ? rows.results.map(o => o.id + ' · ' + statusLabel(lang,o.display_status) + ' · ' + (o.kind === 'digital' ? o.total_stars + '⭐' : money(lang,o.total_vnd) + (lang==='en'?' VND':'đ')) + (admin ? ' · ' + o.user_id : '')).join('\n')
     : t(lang,'noOrders'));
 }
 

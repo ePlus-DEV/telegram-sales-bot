@@ -82,6 +82,19 @@ The dashboard includes:
 
 **Safety boundaries:** Dashboard intentionally does not expose raw key inventory, export user credentials, or issue refunds. Physical shipping notification is not automatically sent from a dashboard action; inform customers separately. For high-volume shops use external identity/SSO and add further controls before production.
 
+## Languages / Ngôn ngữ (vi, en)
+
+The Telegram bot and Web Admin interface support **Tiếng Việt** and **English** without adding an external translation service or frontend framework.
+
+- Telegram automatically uses `from.language_code` (`en`, `en-US`, `vi`, `vi-VN`); unsupported or missing languages fall back to **Vietnamese**.
+- Customers can type **`/language`** for a Vietnamese/English selector, or **`/lang vi`** / **`/lang en`**. A manual choice is saved in D1/Turso `user_locales` and takes priority over future Telegram language codes.
+- Messages for product catalog, orders, Stars invoices, bank-transfer QR instructions, fulfillment, payment alerts, refund status and admin bot commands follow the recipient's stored language. Background SePay/Stars notifications look up the recipient locale.
+- Web Admin has a **🇻🇳 / 🇬🇧** selector on the login page and dashboard, persists the non-sensitive choice in an admin-scoped Secure cookie, and renders translated labels/validation errors without client-side translation scripts. Access controls, CSRF and server-side session remain unchanged.
+- Product titles and descriptions entered by the store owner are **not automatically translated**. Localized product content is a separate roadmap feature; current catalog displays owner-entered content verbatim.
+- To add languages, extend `src/i18n.js` (Telegram messages) and `src/admin/locales.js` (Web Admin). Do not embed new UI copy directly into payment logic.
+
+**Database migration:** run `0006_locales.sql` on **D1 or Turso** before deploying localized code (`npm run db:migrate` or `npm run db:migrate:turso`); take a backup before migrations. Existing customers default to Vietnamese until they interact with the bot or select a language.
+
 ## What works
 
 | Feature | MVP |
@@ -235,7 +248,8 @@ For webhook testing you need an HTTPS endpoint reachable by Telegram/SePay; loca
 - [ ] SSO/RBAC, mass inventory import and role-based approvals
 - [ ] payOS for **physical** goods; optional other compliant gateways
 - [ ] Backup/restore runbooks, monitoring, order export and operational alerting
-- [ ] Internationalization, cart, coupons and referral
+- [x] Vietnamese/English Telegram and Web Admin translations with persistent user preference
+- [ ] Localized product catalog fields, more languages, cart, coupons and referral
 - [ ] Integration tests on deployed staging using Telegram and SePay sandbox/test events
 
 ## Contributing
