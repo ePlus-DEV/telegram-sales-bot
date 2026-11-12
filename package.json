@@ -1,0 +1,18 @@
+{
+  "name": "@eplus-dev/telegram-sales-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Serverless Telegram storefront with Telegram Stars and SePay/VietQR",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/index.js && node --check src/domain.js && node --check scripts/register-webhook.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "webhook:register": "node scripts/register-webhook.mjs"
+  },
+  "devDependencies": { "wrangler": "^4.0.0" }
+}
