@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS purchase_intents (
   chat_id TEXT NOT NULL,
   product_id INTEGER NOT NULL REFERENCES products(id),
   invoice_url TEXT,
+  invoice_claimed_until TEXT,
   checkout_query_id TEXT UNIQUE,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

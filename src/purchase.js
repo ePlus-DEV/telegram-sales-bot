@@ -1,6 +1,10 @@
 import { createOrderId, orderPaymentMatches, validPositiveInt, vietQrUrl } from './domain.js';
 
 async function physicalReceipt(env, chatId, order, send) {
+  if (order.status !== 'PENDING') {
+    return send(env,chatId,'Đơn ' + order.id + ' có trạng thái ' + order.status
+      + '. Không chuyển khoản lại; kiểm tra /orders hoặc liên hệ hỗ trợ.');
+  }
   const qr = vietQrUrl(env,order.id,order.total_vnd);
   return send(env,chatId,'Đơn ' + order.id + '\nSản phẩm: ' + order.name
     + '\nSố tiền: ' + order.total_vnd.toLocaleString('vi-VN') + 'đ'
@@ -18,21 +22,41 @@ async function invoiceReceipt(env, chatId, order, telegram, send) {
   if (!intent) return send(env,chatId,'Không tìm thấy hóa đơn. Liên hệ hỗ trợ.');
   let url = intent.invoice_url;
   if (!url) {
-    // createInvoiceLink returns a URL, not a message. If Telegram responds but
-    // this process crashes before saving, a retry may create another link,
-    // but no link was sent to the user yet. A pre-checkout claim below ensures
-    // only one payment attempt can be authorized for the same order.
-    const response = await telegram(env,'createInvoiceLink',{
-      title: order.name.slice(0,32),
-      description: (order.description || order.name).slice(0,255),
-      payload:order.id,
-      currency:'XTR',
-      prices:[{ label:order.name.slice(0,32),amount:order.total_stars }]
-    });
-    if (typeof response !== 'string' || !/^https:\/\/(?:t\.me|telegram\.me)\//.test(response))
-      throw new Error('Telegram returned an invalid invoice URL');
-    await env.DB.prepare('UPDATE purchase_intents SET invoice_url=? WHERE order_id=? AND invoice_url IS NULL')
-      .bind(response,order.id).run();
+    // A temporary database lease prevents parallel requests from creating
+    // multiple Telegram invoice URLs for the same order. If a worker crashes,
+    // a new request can retry after the 60-second lease expires.
+    const claim = await env.DB.prepare(
+      "UPDATE purchase_intents SET invoice_claimed_until=datetime('now','+60 seconds') "
+      + "WHERE order_id=? AND invoice_url IS NULL "
+      + "AND (invoice_claimed_until IS NULL OR invoice_claimed_until<=CURRENT_TIMESTAMP)"
+    ).bind(order.id).run();
+    if (!claim.meta.changes) {
+      return send(env,chatId,'⏳ Hóa đơn ' + order.id
+        + ' đang được tạo. Dùng /invoice ' + order.id + ' để lấy lại link sau ít phút.');
+    }
+    try {
+      const response = await telegram(env,'createInvoiceLink',{
+        title: order.name.slice(0,32),
+        description: (order.description || order.name).slice(0,255),
+        payload:order.id,
+        currency:'XTR',
+        prices:[{ label:order.name.slice(0,32),amount:order.total_stars }]
+      });
+      if (typeof response !== 'string' || !/^https:\/\/(?:t\.me|telegram\.me)\//.test(response))
+        throw new Error('Telegram returned an invalid invoice URL');
+      await env.DB.prepare(
+        'UPDATE purchase_intents SET invoice_url=?,invoice_claimed_until=NULL '
+        + 'WHERE order_id=? AND invoice_url IS NULL'
+      ).bind(response,order.id).run();
+    } catch (error) {
+      // Reset our claim on an API outage; an unhandled process crash still
+      // leaves a bounded lease that can expire safely.
+      await env.DB.prepare(
+        'UPDATE purchase_intents SET invoice_claimed_until=NULL '
+        + 'WHERE order_id=? AND invoice_url IS NULL'
+      ).bind(order.id).run();
+      throw error;
+    }
     intent = await env.DB.prepare('SELECT invoice_url FROM purchase_intents WHERE order_id=?')
       .bind(order.id).first();
     url = intent?.invoice_url;
