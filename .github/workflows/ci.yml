@@ -21,6 +21,8 @@ jobs:
         run: npm run check
       - name: Documentation links
         run: npm run docs:check
+      - name: Validate migration schema (disposable SQLite)
+        run: npm run staging:check-migrations
       - name: Test suite
         run: npm test
       - name: Docker image build

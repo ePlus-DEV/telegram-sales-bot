@@ -70,3 +70,7 @@ No production deploy or migrations are performed automatically by the GitHub CI 
 Current MVP has health endpoint, database-backed notification retry and basic operational commands. It does **not** yet include complete paid-order alerts, automated reconciliation of approved-but-abandoned Stars checkouts, trusted non-Cloudflare scheduling, backup automation, full audit dashboards or SLO/uptime reporting.
 
 See [P0 release gates](../ROADMAP.md) and the [Security Policy](../SECURITY.md). Do not claim production certification until the recovery drill and provider end-to-end tests have passed.
+
+## Safe staging smoke and release evidence
+
+Use the [Staging Validation checklist](STAGING_VALIDATION.md) to check migration schemas, webhook authentication rejection and Admin login/CSRF behavior. A protected workflow is manual-only and must be pointed at an explicitly staging-named HTTPS host. Keep the run link and separate payment E2E evidence; do not interpret green CI or an HTTP health check as proof of successful settlement.

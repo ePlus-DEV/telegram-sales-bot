@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/admin/handler.js && node --check src/admin/auth.js && node --check src/admin/ui.js && node --check api/admin.js && node --check src/i18n.js && node --check src/admin/locales.js && node --check src/index.js && node --check src/purchase.js && node --check src/reconciliation.js && node --check src/domain.js && node --check src/runtime.js && node --check src/server.js && node --check src/adapters/turso.js && node --check scripts/register-webhook.mjs && node --check scripts/migrate-turso.mjs && node --check api/healthz.js && node --check api/telegram-webhook.js && node --check api/sepay-webhook.js",
+    "check": "node --check src/admin/handler.js && node --check src/admin/auth.js && node --check src/admin/ui.js && node --check api/admin.js && node --check src/i18n.js && node --check src/admin/locales.js && node --check src/index.js && node --check src/purchase.js && node --check src/reconciliation.js && node --check src/domain.js && node --check src/runtime.js && node --check src/server.js && node --check src/adapters/turso.js && node --check scripts/register-webhook.mjs && node --check scripts/migrate-turso.mjs && node --check api/healthz.js && node --check api/telegram-webhook.js && node --check api/sepay-webhook.js && node --check scripts/staging/preflight.mjs && node --check scripts/staging/check-migrations.mjs && node --check scripts/staging/smoke.mjs && node --check scripts/staging/check-turso.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "start": "node src/server.js",
@@ -18,7 +18,11 @@
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:turso": "node scripts/migrate-turso.mjs",
     "webhook:register": "node scripts/register-webhook.mjs",
-    "docs:check": "node scripts/check-docs.mjs"
+    "docs:check": "node scripts/check-docs.mjs",
+    "staging:preflight": "node scripts/staging/preflight.mjs",
+    "staging:check-migrations": "node scripts/staging/check-migrations.mjs",
+    "staging:smoke": "node scripts/staging/smoke.mjs",
+    "staging:check-turso": "node scripts/staging/check-turso.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

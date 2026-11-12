@@ -41,3 +41,9 @@ Node.js 24 preferred. Run `npm run check`, `npm test` and validate the Docker bu
 - Treat [ROADMAP.md](ROADMAP.md) as the project-level delivery plan; distinguish implemented code, partial functionality, deployment verification and release gates.
 - Never imply that CI means verified payments or production readiness. Do not claim a host was deployed unless an end-to-end test actually ran.
 - Keep English/Vietnamese getting-started guides consistent and run `npm run docs:check` after changing Markdown links.
+
+## Staging verification rules
+- PR CI may run disposable SQLite migrations and local Worker mocks, but must never deploy or call a live payment provider.
+- `.github/workflows/staging-validation.yml` must remain manual-only, scoped to main and GitHub Environment staging, with read-only permissions. Never introduce scheduled execution, webhook registration, order mutations or production secrets.
+- Staging HTTP smoke must only send intentionally unauthenticated Telegram/SePay requests and safe Admin authentication/logout flows; enforce staging-only HTTPS hostnames and no redirect following.
+- Always distinguish offline checks, a remote staging HTTP/DB check, and a supervised payment E2E test. Passing one does not imply the others passed.

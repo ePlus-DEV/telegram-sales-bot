@@ -27,7 +27,7 @@
 
 | Item | State | Acceptance criteria |
 | --- | --- | --- |
-| Deploy and validate staging | Planned | Working HTTPS endpoint + persistent DB; migrations 0001–0006; deployed domain and webhook verified; no production secrets in preview |
+| Deploy and validate staging | **Partial — tooling via [staging validation](docs/STAGING_VALIDATION.md)** | Offline migrations + non-destructive HTTP/Admin probes + manual protected workflow implemented; **no live staging deploy, successful remote run or valid payment E2E verified** |
 | Payment E2E test matrix | Planned | Stars success/replay/failed notification, SePay valid/invalid/duplicate/late credit, inventory and unauthorized admin cases all verified in a controlled test environment |
 | Approved Stars checkout recovery | Partial · [#5](https://github.com/ePlus-DEV/telegram-sales-bot/issues/5) | Never release reserved stock while charge may arrive; document reconciliation of orphaned approvals and late successful payments |
 | Refund and dispute runbook | Partial · [#5](https://github.com/ePlus-DEV/telegram-sales-bot/issues/5) | Reconcile uncertain `refundStarPayment` result, bank refunds (manual), customer communication and audit evidence |
@@ -62,7 +62,7 @@
 ## Release milestones
 
 1. **MVP engineering foundation — implemented:** bot, payment adapters, admin, localization, multi-host configs and CI.
-2. **Staging validation — next:** operator walkthroughs and scenario-based E2E records for a dedicated test bot + database.
+2. **Staging validation — tooling added, execution pending:** manual-only GitHub Actions smoke workflow, offline migration schema checks and operator walkthrough; live deploy, remote runs and provider payments still require independent evidence.
 3. **Release candidate:** P0 gates, data migration/restore drill, monitoring, usability review, security audit, issue triage.
 4. **v1.0.0:** only after release candidate passes; then expand P1/P2 independently.
 
