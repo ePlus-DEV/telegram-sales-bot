@@ -143,7 +143,7 @@ test('session CSRF, secure product CRUD, inventory redaction and logout',async()
     active:'0',price:'50'
   },db,cookie);
   assert.equal(edit.status,303);
-  assert.deepEqual(db.raw.prepare('SELECT name,price_stars,active FROM products').get(),{
+  assert.deepEqual({...db.raw.prepare('SELECT name,price_stars,active FROM products').get()},{
     name:'Edited license',price_stars:50,active:0
   });
   assert.equal(db.raw.prepare('SELECT COUNT(*) AS n FROM admin_audit').get().n,3);
