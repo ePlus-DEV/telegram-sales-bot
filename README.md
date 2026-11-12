@@ -7,6 +7,30 @@ A lightweight, open-source **Telegram storefront** by **ePlus.DEV** built for **
 
 > **Early MVP:** Review code and run test payments before accepting real money. Not a production-hardened commerce product yet.
 
+## Deploy options (Cloudflare, Vercel, Railway, Render, Koyeb, Docker)
+
+**One backend, multiple runtimes.** Cloudflare Workers use native D1. All other targets use **Turso/libSQL** (remote persisted SQLite, not the host's temporary local filesystem). The Telegram and SePay webhook routes remain identical on every provider.
+
+| Target | Backend | Database | Deployment | Notes |
+| --- | --- | --- | --- | --- |
+| Cloudflare Workers | Fetch handler | D1 | `npm run deploy` | Best for no always-on server, no extra database account |
+| [Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot&env=TURSO_DATABASE_URL,TURSO_AUTH_TOKEN,BOT_TOKEN,TELEGRAM_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,ADMIN_TELEGRAM_ID,BANK_BIN,BANK_ACCOUNT_NO,BANK_ACCOUNT_NAME) | Serverless Functions | Turso | [Deploy to Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot) | The `vercel.json` rewrite maps public routes to functions |
+| [Railway](https://railway.com/new) | Node HTTP via Docker | Turso | GitHub → deploy `Dockerfile` | Persistent service; credits and plan limits apply |
+| [Render](https://render.com/deploy?repo=https://github.com/ePlus-DEV/telegram-sales-bot) | Node HTTP via Docker | Turso | [Deploy to Render](https://render.com/deploy?repo=https://github.com/ePlus-DEV/telegram-sales-bot) | Free web service sleeps when idle; webhook cold starts may be problematic |
+| [Koyeb](https://app.koyeb.com/apps/new) | Node HTTP via Docker | Turso | Import GitHub and Dockerfile | Free instance limits and idle behavior apply |
+| Docker / VPS / EasyPanel | Node HTTP | Turso | `docker build`, `docker run` | You control uptime and HTTPS proxy |
+
+**Setup for non-Cloudflare hosts** (read [full deployment guide](docs/DEPLOYMENT.md)):
+
+1. Create a remote [Turso](https://turso.tech/) database and obtain `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
+2. Run `npm run db:migrate:turso` on your machine or CI using the two variables; never run migrations against a production database without backup.
+3. Connect the repository to the desired platform; configure the variables from [`.env.example`](.env.example).
+4. Deploy and verify `https://YOUR_DOMAIN/healthz` responds `{"ok":true,...}`.
+5. Set `PUBLIC_BASE_URL=https://YOUR_DOMAIN`, `BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` locally, then run `npm run webhook:register`.
+6. For physical products, configure SePay callback URL `https://YOUR_DOMAIN/sepay/webhook` and verify end-to-end with a test bank transfer. Digital products use Telegram Stars.
+
+**Important:** Deploying code does not automatically configure the Telegram or SePay webhook, and does not automatically migrate D1 data to Turso. Use **one active environment per bot token**: setting a new Telegram webhook endpoint routes updates to that environment. Avoid using real payment credentials on preview deployments.
+
 ## What works
 
 | Feature | MVP |
@@ -27,7 +51,7 @@ A lightweight, open-source **Telegram storefront** by **ePlus.DEV** built for **
 
 **Bank transfer does not complete physical shipping.** An admin must fulfil the order manually after verifying the shipment.
 
-## Free deployment: Cloudflare Workers + D1
+## Cloudflare Workers + D1 (native deployment)
 
 Cloudflare Workers Free and D1 Free have usage/storage quotas. Hitting the quota interrupts service until it resets or the account is upgraded; free availability is not an uptime guarantee. The project uses Telegram Webhooks so no background daemon is necessary.
 
@@ -78,7 +102,7 @@ Cloudflare Workers Free and D1 Free have usage/storage quotas. Hitting the quota
    ~~~sh
    export BOT_TOKEN='...'
    export TELEGRAM_WEBHOOK_SECRET='...'
-   export WORKER_URL='https://eplus-telegram-sales-bot.YOUR_SUBDOMAIN.workers.dev'
+   export PUBLIC_BASE_URL='https://eplus-telegram-sales-bot.YOUR_SUBDOMAIN.workers.dev'
    npm run webhook:register
    ~~~
 
@@ -126,11 +150,14 @@ npm run check
 npm test
 ~~~
 
-For webhook testing you need an HTTPS endpoint reachable by Telegram/SePay; local `localhost` URLs are insufficient.
+For webhook testing you need an HTTPS endpoint reachable by Telegram/SePay; local `localhost` URLs are insufficient. See [multi-platform deployment guide](docs/DEPLOYMENT.md).
 
 ## Architecture
 
 - `src/index.js`: HTTP routes, Telegram Bot API integration, payment flows
+- `src/runtime.js`, `src/adapters/turso.js`: portable DB adapter with D1-compatible queries
+- `src/server.js`: Node HTTP server for Docker, Railway, Render and Koyeb
+- `api/`, `vercel.json`: Vercel Serverless Functions adapters and rewrites
 - `src/domain.js`: validated payment and order helpers
 - `migrations/`: D1 schema
 - `scripts/register-webhook.mjs`: explicit Telegram setWebhook registration

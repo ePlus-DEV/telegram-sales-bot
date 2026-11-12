@@ -1,6 +1,7 @@
-const { BOT_TOKEN: botToken, TELEGRAM_WEBHOOK_SECRET: secret, WORKER_URL: workerUrl } = process.env;
-if (!botToken || !secret || !workerUrl) {
-  console.error('Missing BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET or WORKER_URL');
+const { BOT_TOKEN: botToken, TELEGRAM_WEBHOOK_SECRET: secret } = process.env;
+const publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.WORKER_URL;
+if (!botToken || !secret || !publicBaseUrl) {
+  console.error('Missing BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET or PUBLIC_BASE_URL');
   process.exit(1);
 }
 if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
@@ -9,10 +10,10 @@ if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret)) {
 }
 let url;
 try {
-  url = new URL(workerUrl);
+  url = new URL(publicBaseUrl);
   if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('Invalid URL');
 } catch {
-  console.error('WORKER_URL must be an HTTPS base URL without query/hash or credentials');
+  console.error('PUBLIC_BASE_URL must be an HTTPS base URL without query/hash or credentials');
   process.exit(1);
 }
 const response = await fetch('https://api.telegram.org/bot' + botToken + '/setWebhook', {
