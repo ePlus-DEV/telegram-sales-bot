@@ -29,3 +29,9 @@ Node.js 24 preferred. Run `npm run check`, `npm test` and validate the Docker bu
 - Every mutation requires HttpOnly session, same-origin validation, CSRF and SQL-bound parameters; record a safe audit event.
 - Never expose raw inventory keys, DB tokens, payment secrets, or admin password in HTML, API, logs or PR descriptions.
 - Use forward-only migrations on both D1 and Turso. Validate unauthorized, CSRF, XSS, rate-limit and ledger invariant cases in CI.
+
+## Localization conventions
+- Never hard-code new Telegram user-facing text in payment handlers. Add both vi/en messages to `src/i18n.js` with stable keys; preserve refund, currency, account and ledger semantics.
+- Web Admin static labels belong in `src/admin/locales.js`. Never translate user-provided product names, credentials, data or key contents.
+- Telegram manual locale selection must persist across Workers and Turso runtimes and override language_code. Unsupported languages fall back to Vietnamese.
+- Add tests for locale switching, auto-detection, fallback, background notifications and English admin login. Do not break legacy Vietnamese flows.

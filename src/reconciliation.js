@@ -1,3 +1,4 @@
+import {t} from './i18n.js';
 // Payment lifecycle kept in sidecar tables to preserve existing order FKs and
 // status constraints. Never automatically refund a charge or release inventory
 // after Telegram pre-checkout was authorized.
@@ -82,15 +83,15 @@ export async function listRefundReviews(env, max = 10) {
   return results;
 }
 
-export async function refundPaidStars(env, orderId, telegram) {
+export async function refundPaidStars(env, orderId, telegram, language='vi') {
   const id = String(orderId || '').trim();
   const order = await env.DB.prepare(
     "SELECT * FROM orders WHERE id=? AND provider='stars' AND kind='digital' AND status='PAID' AND payment_ref IS NOT NULL"
   ).bind(id).first();
-  if (!order) return { status:'DENIED',detail:'Chỉ được hoàn Stars cho đơn PAID chưa giao hàng.' };
+  if (!order) return { status:'DENIED',detail:t(language,'refundDenied') };
   const userId = Number(order.user_id);
   if (!Number.isSafeInteger(userId) || userId < 1)
-    return { status:'DENIED',detail:'Telegram user ID không hợp lệ.' };
+    return { status:'DENIED',detail:t(language,'refundBadUser') };
   // Conditional DB insert acts as the refund lock: no other call can refund
   // the same order, even if two admins issue the command concurrently.
   const locked = await env.DB.prepare(
@@ -102,7 +103,7 @@ export async function refundPaidStars(env, orderId, telegram) {
   ).bind(id).run();
   if (!locked.meta.changes) {
     const existing = await env.DB.prepare('SELECT state FROM star_refunds WHERE order_id=?').bind(id).first();
-    return {status:existing?.state || 'DENIED',detail:'Không được gọi hoàn tiền lặp. Kiểm tra đối soát trước.'};
+    return {status:existing?.state || 'DENIED',detail:t(language,'refundDuplicate')};
   }
   try {
     // Network failures have an UNKNOWN outcome: never automatically repeat
@@ -115,13 +116,13 @@ export async function refundPaidStars(env, orderId, telegram) {
       "UPDATE star_refunds SET state='CONFIRMED',completed_at=CURRENT_TIMESTAMP,note=NULL "
       + "WHERE order_id=? AND state='CALLING'"
     ).bind(id).run();
-    return {status:'CONFIRMED',detail:'Telegram xác nhận hoàn Stars thành công.'};
+    return {status:'CONFIRMED',detail:t(language,'refundConfirmed')};
   } catch (error) {
     console.error('Stars refund requires reconciliation:',error.message);
     await env.DB.prepare(
       "UPDATE star_refunds SET state='NEEDS_REVIEW',note='Verify with Telegram before any retry' "
       + "WHERE order_id=? AND state='CALLING'"
     ).bind(id).run();
-    return {status:'NEEDS_REVIEW',detail:'Kết quả chưa chắc chắn. Kiểm tra giao dịch Telegram; không gửi yêu cầu hoàn tiền lần hai.'};
+    return {status:'NEEDS_REVIEW',detail:t(language,'refundReview')};
   }
 }

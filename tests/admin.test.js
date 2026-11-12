@@ -8,10 +8,10 @@ import {createServer} from '../src/server.js';
 
 function testDb() {
   const sqlite=new DatabaseSync(':memory:');
-  for(let n=1;n<=5;n++) {
+  for(let n=1;n<=6;n++) {
     const file=new URL('../migrations/000'+n+'_'+({
       1:'initial',2:'notification_outbox',3:'purchase_intents',
-      4:'payment_reconciliation',5:'web_admin'
+      4:'payment_reconciliation',5:'web_admin',6:'locales'
     })[n]+'.sql',import.meta.url);
     sqlite.exec(readFileSync(file,'utf8'));
   }
@@ -209,4 +209,40 @@ test('Node HTTP adapter respects Host and proxy HTTPS origin for admin forms',as
     redirect:'manual'
   });
   assert.equal(bad.status,403);
+});
+
+test('English admin language works on login, product UI, notices and stored preferences',async()=>{
+  const db=testDb();
+  const loginScreen=await get('/admin?lang=en',db);
+  assert.equal(loginScreen.status,200);
+  assert.match(loginScreen.headers.get('set-cookie'),/eplus_admin_lang=en/);
+  const html=await loginScreen.text();
+  assert.match(html,/Admin sign in/);
+  assert.match(html,/Admin password/);
+  assert.match(html,/<html lang="en">/);
+  const logged=await post('/admin/login?lang=en',{password},db);
+  assert.equal(logged.status,303);
+  const sessionCookie=logged.headers.get('set-cookie').split(';')[0];
+  const prefCookie='eplus_admin_lang=en';
+  const cookie=sessionCookie+'; '+prefCookie;
+  const dashboard=await get('/admin?tab=products',db,{cookie});
+  assert.equal(dashboard.status,200);
+  const translated=await dashboard.text();
+  assert.match(translated,/Products &amp; inventory|Products & inventory/);
+  assert.match(translated,/Create product/);
+  assert.doesNotMatch(translated,/Thêm sản phẩm/);
+  const csrf=translated.match(/name="csrf" value="([a-f0-9]{48})"/)?.[1];
+  assert.ok(csrf);
+  const created=await post('/admin/products/create',{
+    csrf,kind:'physical',name:'Sản phẩm đặc biệt',price:'10000'
+  },db,cookie);
+  assert.equal(created.status,303);
+  const check=await (await get('/admin?tab=products',db,{cookie})).text();
+  assert.match(check,/Product name/);
+  assert.doesNotMatch(check,/Special product/);
+  // Browser decodes numeric entities, but server never translates owner-entered names.
+  assert.ok(check.includes('&#x'));
+  const failure=await post('/admin/login?lang=en',{password:'wrong'},db);
+  assert.equal(failure.status,401);
+  assert.match(await failure.text(),/Invalid password/);
 });

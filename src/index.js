@@ -3,6 +3,7 @@ import { createPurchase, recoverInvoice, approvePrecheckout } from './purchase.j
 import { enqueueNotification, flushNotifications } from './notifications.js';
 import { expirePendingOrders, recordBankReview, listBankReviews, acknowledgeBankReview, listRefundReviews, refundPaidStars } from './reconciliation.js';
 import { handleAdminRequest } from './admin/handler.js';
+import {t,money,languageFor,languageForId,setLanguage,statusLabel} from './i18n.js';
 
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -22,19 +23,19 @@ const send = (env, chatId, text, extra = {}) => telegram(env, 'sendMessage', { c
 const adminId = env => String(env.ADMIN_TELEGRAM_ID || '');
 const isAdmin = (env, id) => !!adminId(env) && String(id) === adminId(env);
 
-async function catalog(env, chatId) {
+async function catalog(env, chatId, lang) {
   const rows = await env.DB.prepare('SELECT id,name,description,kind,price_vnd,price_stars FROM products WHERE active=1 ORDER BY id DESC LIMIT 30').all();
-  if (!rows.results.length) return send(env, chatId, 'Chưa có sản phẩm. Vui lòng quay lại sau.');
-  await send(env, chatId, '🛍 Danh sách sản phẩm (tối đa 30 mục):');
+  if (!rows.results.length) return send(env, chatId,t(lang,'noProducts'));
+  await send(env, chatId,t(lang,'catalogTitle'));
   for (const p of rows.results) {
-    const price = p.kind === 'digital' ? p.price_stars + ' ⭐' : p.price_vnd.toLocaleString('vi-VN') + 'đ';
+    const price = p.kind === 'digital' ? p.price_stars + ' ⭐' : money(lang,p.price_vnd) + (lang==='en'?' VND':'đ');
     await send(env, chatId, '#' + p.id + ' · ' + p.name + '\n' + p.description + '\n' + price, {
-      reply_markup: { inline_keyboard: [[{ text: '🛒 Mua', callback_data: 'buy:' + p.id }]] }
+      reply_markup: { inline_keyboard: [[{ text: t(lang,'buy'), callback_data: 'buy:' + p.id }]] }
     });
   }
 }
 
-async function listOrders(env, chatId, userId, admin = false) {
+async function listOrders(env, chatId, userId, admin = false, lang='vi') {
   const projection = "SELECT o.id,o.user_id,o.kind,o.status,o.total_vnd,o.total_stars,"
     + "CASE WHEN r.state='CONFIRMED' THEN 'REFUNDED' "
     + "WHEN r.state IS NOT NULL THEN 'REFUND_'||r.state "
@@ -47,8 +48,8 @@ async function listOrders(env, chatId, userId, admin = false) {
     : env.DB.prepare(projection+'WHERE o.user_id=? ORDER BY o.created_at DESC LIMIT 10').bind(String(userId));
   const rows = await stmt.all();
   return send(env, chatId, rows.results.length
-    ? rows.results.map(o => o.id + ' · ' + o.display_status + ' · ' + (o.kind === 'digital' ? o.total_stars + '⭐' : o.total_vnd + 'đ') + (admin ? ' · ' + o.user_id : '')).join('\n')
-    : 'Chưa có đơn hàng.');
+    ? rows.results.map(o => o.id + ' · ' + statusLabel(lang,o.display_status) + ' · ' + (o.kind === 'digital' ? o.total_stars + '⭐' : money(lang,o.total_vnd) + (lang==='en'?' VND':'đ')) + (admin ? ' · ' + o.user_id : '')).join('\n')
+    : t(lang,'noOrders'));
 }
 
 async function finishStars(env, message) {
@@ -106,89 +107,92 @@ async function finishStars(env, message) {
   await flushNotifications(env,send,{ orderId:id });
 }
 
-async function adminCommand(env, chatId, text) {
+async function adminCommand(env, chatId, text, lang) {
   if (text.startsWith('/addphysical ') || text.startsWith('/adddigital ')) {
     const physical = text.startsWith('/addphysical ');
     const fields = text.slice(physical ? 13 : 12).split('|').map(v => v.trim());
     const amount = validPositiveInt(fields[1], physical ? 999999999 : 100000);
     if (fields.length !== 3 || !fields[0] || fields[0].length > 80 || !amount || fields[2].length > 240) {
-      return send(env, chatId, 'Cú pháp: /addphysical Tên | Giá VND | Mô tả\nhoặc /adddigital Tên | Giá Stars | Mô tả');
+      return send(env, chatId, t(lang,'physicalUsage'));
     }
     const result = await env.DB.prepare('INSERT INTO products(name,description,kind,price_vnd,price_stars) VALUES(?,?,?,?,?)')
       .bind(fields[0], fields[2], physical ? 'physical' : 'digital', physical ? amount : 0, physical ? 0 : amount).run();
-    return send(env, chatId, 'Đã tạo sản phẩm #' + result.meta.last_row_id + (physical ? ' (hàng vật lý)' : ' (sản phẩm số - Stars)'));
+    return send(env, chatId, t(lang,physical?'productCreatedPhysical':'productCreatedDigital',{id:result.meta.last_row_id}));
   }
   if (text.startsWith('/addkey ')) {
     const match = text.match(/^\/addkey\s+(\d+)\s*\|\s*([\s\S]+)$/);
-    if (!match || match[2].length > 2000) return send(env, chatId, 'Cú pháp: /addkey ID | Giá trị key/tài khoản');
+    if (!match || match[2].length > 2000) return send(env, chatId, t(lang,'keyUsage'));
     const p = await env.DB.prepare("SELECT id FROM products WHERE id=? AND kind='digital'").bind(Number(match[1])).first();
-    if (!p) return send(env, chatId, 'Sản phẩm số không tồn tại.');
+    if (!p) return send(env, chatId, t(lang,'digitalNotFound'));
     await env.DB.prepare('INSERT INTO digital_inventory(product_id,secret_value) VALUES(?,?)').bind(p.id,match[2].trim()).run();
-    return send(env, chatId, 'Đã bổ sung 1 key cho sản phẩm #' + p.id);
+    return send(env, chatId, t(lang,'keyAdded',{id:p.id}));
   }
-  if (text === '/admin') return send(env, chatId, 'Quản trị:\n/addphysical Tên | VND | Mô tả\n/adddigital Tên | Stars | Mô tả\n/addkey ID | Key\n/adminorders\n/expireorders\n/bankreviews\n/ackbank MÃ_GIAO_DỊCH\n/refundstars MÃ_ĐƠN\n/refundreviews\n/retryalerts\n/fulfill MÃ_ĐƠN');
-  if (text === '/adminorders') return listOrders(env, chatId, null, true);
+  if (text === '/admin') return send(env, chatId, t(lang,'adminHelp'));
+  if (text === '/adminorders') return listOrders(env, chatId, null, true, lang);
   if (text === '/expireorders') {
     const result = await expirePendingOrders(env,{limit:50});
-    return send(env,chatId,'Đã hết hạn '+result.expired+' đơn, giải phóng '+result.releasedKeys+' key. Đơn đã duyệt pre-checkout được giữ lại.');
+    return send(env,chatId,t(lang,'expiredReport',{expired:result.expired,keys:result.releasedKeys}));
   }
   if (text === '/bankreviews') {
     const rows = await listBankReviews(env);
     return send(env,chatId,rows.length
-      ? 'Giao dịch cần đối soát (không tự cộng tiền):\n'
-        + rows.map(x=>x.event_id+' · '+x.order_id+' · '+x.amount_vnd+'đ · '+x.reason).join('\n')
-      : 'Không có giao dịch ngân hàng chờ đối soát.');
+      ? t(lang,'bankReviews',{rows:rows.map(x=>x.event_id+' · '+x.order_id+' · '+money(lang,x.amount_vnd)+' VND · '+x.reason).join('\n')})
+      : t(lang,'noBankReviews'));
   }
   if (text.startsWith('/ackbank ')) {
     const id=text.slice('/ackbank '.length).trim();
     const ok=await acknowledgeBankReview(env,id);
     return send(env,chatId,ok
-      ? 'Đã đánh dấu đối soát '+id+'. Chỉ là ghi nhận thủ công; không hoàn tiền hay cộng số dư.'
-      : 'Không tìm thấy giao dịch chờ đối soát.');
+      ? t(lang,'bankReviewed',{id})
+      : t(lang,'noBankReview'));
   }
   if (text === '/refundreviews') {
     const rows=await listRefundReviews(env);
     return send(env,chatId,rows.length
-      ? 'Hoàn Stars cần xác minh với Telegram:\n'+rows.map(x=>x.order_id+' · '+x.state).join('\n')
-      : 'Không có hoàn Stars đang chờ xác minh.');
+      ? t(lang,'refundReviews',{rows:rows.map(x=>x.order_id+' · '+x.state).join('\n')})
+      : t(lang,'noRefundReviews'));
   }
   if (text.startsWith('/refundstars ')) {
-    const result=await refundPaidStars(env,text.slice('/refundstars '.length),telegram);
-    return send(env,chatId,'Hoàn Stars: '+result.status+'\n'+result.detail);
+    const result=await refundPaidStars(env,text.slice('/refundstars '.length),telegram,lang);
+    return send(env,chatId,t(lang,'refundResponse',{status:result.status,detail:result.detail}));
   }
   if (text === '/retryalerts') {
     try {
       const count = await flushNotifications(env,send,{limit:20});
-      return send(env,chatId,'✅ Đã gửi lại ' + count + ' thông báo đang chờ. Chạy lại để xử lý tiếp nếu cần.');
+      return send(env,chatId,t(lang,'retrySent',{count}));
     } catch (error) {
       console.error('Admin notification recovery failed:',error.message);
-      return send(env,chatId,'⚠️ Gửi lại thông báo thất bại. Kiểm tra logs và thử /retryalerts sau.');
+      return send(env,chatId,t(lang,'retryFailed'));
     }
   }
   if (text.startsWith('/fulfill ')) {
     const id = text.slice(9).trim();
     const order = await env.DB.prepare("SELECT * FROM orders WHERE id=? AND kind='physical' AND status='PAID'").bind(id).first();
-    if (!order) return send(env, chatId, 'Không có đơn vật lý đã thanh toán đang chờ xử lý.');
+    if (!order) return send(env, chatId, t(lang,'noPhysicalPaid'));
     const r = await env.DB.prepare("UPDATE orders SET status='FULFILLED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PAID'").bind(id).run();
     if (r.meta.changes) {
-      await send(env, order.user_id, '✅ Đơn ' + id + ' đã được admin đánh dấu hoàn tất.');
-      return send(env, chatId, 'Đã hoàn tất ' + id);
+      await send(env, order.user_id, t(await languageForId(env,order.user_id),'physicalFulfilledNotice',{id}));
+      return send(env, chatId, t(lang,'physicalFulfilled',{id}));
     }
   }
-  return send(env, chatId, 'Lệnh quản trị chưa hợp lệ. Dùng /admin.');
+  return send(env, chatId, t(lang,'invalidAdmin'));
 }
 
 async function telegramUpdate(env, update) {
   if (update.pre_checkout_query) {
     const q = update.pre_checkout_query;
+    const lang=await languageFor(env,q.from);
     const ok = await approvePrecheckout(env,q);
     return telegram(env, 'answerPreCheckoutQuery', {
       pre_checkout_query_id: q.id, ok,
-      ...(!ok ? { error_message: 'Đơn không hợp lệ hoặc đã được thanh toán. Vui lòng đặt lại.' } : {})
+      ...(!ok ? { error_message: t(lang,'invalidCheckout') } : {})
     });
   }
   const message = update.message;
-  if (message?.successful_payment) return finishStars(env, message);
+  if (message?.successful_payment) {
+    await languageFor(env,message.from);
+    return finishStars(env,message);
+  }
   const callback = update.callback_query;
   if (callback) {
     // A transient acknowledgement failure must not lose the purchase.
@@ -197,13 +201,19 @@ async function telegramUpdate(env, update) {
     } catch (error) {
       console.error('Callback acknowledgement failed:',error.message);
     }
+    const lang=await languageFor(env,callback.from);
+    const languageChoice=String(callback.data||'').match(/^lang:(vi|en)$/);
+    if (languageChoice && callback.message?.chat?.id) {
+      const selected=await setLanguage(env,callback.from.id,languageChoice[1]);
+      return send(env,callback.message.chat.id,t(selected,'languageSaved'));
+    }
     const match = String(callback.data || '').match(/^buy:(\d+)$/);
     const chat = callback.message?.chat;
     if (match && chat?.id && String(chat.id) === String(callback.from?.id)
         && (!chat.type || chat.type === 'private')) {
       return createPurchase(env,{
         callbackId:callback.id,chatId:chat.id,userId:callback.from.id,productId:Number(match[1])
-      },telegram,send);
+      },telegram,send,lang);
     }
     return;
   }
@@ -211,19 +221,35 @@ async function telegramUpdate(env, update) {
   const chatId = message.chat.id;
   const userId = message.from?.id;
   const text = String(message.text || '').trim();
-  if (text === '/start') return send(env, chatId, '👋 Chào mừng đến ePlus Telegram Sales Bot!\n/catalog — Sản phẩm\n/orders — Đơn hàng\n/invoice MÃ_ĐƠN — Link Stars\n/help — Trợ giúp');
-  if (text === '/help') return send(env, chatId, 'Lệnh: /catalog, /orders, /invoice MÃ_ĐƠN, /mykey MÃ_ĐƠN, /paysupport.\nSản phẩm số thanh toán bằng Telegram Stars. Hàng vật lý dùng QR ngân hàng và SePay.');
-  if (text === '/catalog' || text === '/products') return catalog(env, chatId);
-  if (text === '/orders') return listOrders(env, chatId, userId);
-  if (text.startsWith('/invoice ')) return recoverInvoice(env,chatId,userId,text.slice(9),telegram,send);
+  const lang=await languageFor(env,message.from);
+  if (text === '/start') return send(env, chatId,t(lang,'welcome'));
+  if (text === '/help') return send(env, chatId,t(lang,'help'));
+  if (text === '/language' || text === '/lang') {
+    return send(env,chatId,t(lang,'languagePrompt'),{
+      reply_markup:{inline_keyboard:[[
+        {text:'🇻🇳 Tiếng Việt',callback_data:'lang:vi'},
+        {text:'🇬🇧 English',callback_data:'lang:en'}
+      ]]}
+    });
+  }
+  if (text.startsWith('/lang ')) {
+    const requested=text.slice(6).trim().toLowerCase();
+    if(requested!=='vi' && requested!=='en')
+      return send(env,chatId,t(lang,'invalidLanguage'));
+    const selected=await setLanguage(env,userId,requested);
+    return send(env,chatId,t(selected,'languageSaved'));
+  }
+  if (text === '/catalog' || text === '/products') return catalog(env, chatId, lang);
+  if (text === '/orders') return listOrders(env, chatId, userId, false, lang);
+  if (text.startsWith('/invoice ')) return recoverInvoice(env,chatId,userId,text.slice(9),telegram,send,lang);
   if (text.startsWith('/mykey ')) {
     const id = text.slice(7).trim();
     const item = await env.DB.prepare("SELECT i.secret_value FROM orders o JOIN digital_inventory i ON i.delivered_order_id=o.id WHERE o.id=? AND o.user_id=? AND o.status='FULFILLED'").bind(id,String(userId)).first();
-    return send(env, chatId, item ? '🔑 Key của đơn ' + id + ':\n' + item.secret_value : 'Không tìm thấy key được phép truy cập.');
+    return send(env, chatId, item ? t(lang,'keyFound',{id,secret:item.secret_value}):t(lang,'keyMissing'));
   }
-  if (text === '/paysupport') return send(env, chatId, 'Hỗ trợ thanh toán: ' + (env.SUPPORT_USERNAME ? '@' + env.SUPPORT_USERNAME.replace(/^@/, '') : 'Liên hệ admin cửa hàng.'));
-  if (isAdmin(env,userId) && text.startsWith('/')) return adminCommand(env,chatId,text);
-  return send(env, chatId, 'Dùng /catalog để xem sản phẩm hoặc /help để được hỗ trợ.');
+  if (text === '/paysupport') return send(env,chatId,t(lang,'support',{contact:env.SUPPORT_USERNAME?'@'+env.SUPPORT_USERNAME.replace(/^@/,''):t(lang,'supportAdmin')}));
+  if (isAdmin(env,userId) && text.startsWith('/')) return adminCommand(env,chatId,text,lang);
+  return send(env,chatId,t(lang,'unknownCommand'));
 }
 
 async function sepayWebhook(env, body) {

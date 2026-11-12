@@ -8,6 +8,7 @@ const schema = readFileSync(new URL('../migrations/0001_initial.sql', import.met
 const schemaV2 = readFileSync(new URL('../migrations/0002_notification_outbox.sql', import.meta.url),'utf8');
 const schemaV3 = readFileSync(new URL('../migrations/0003_purchase_intents.sql', import.meta.url),'utf8');
 const schemaV4 = readFileSync(new URL('../migrations/0004_payment_reconciliation.sql', import.meta.url),'utf8');
+const schemaV6 = readFileSync(new URL('../migrations/0006_locales.sql', import.meta.url),'utf8');
 const envDefaults = {
   BOT_TOKEN:'fake_test_bot_token', TELEGRAM_WEBHOOK_SECRET:'known-secret',
   SEPAY_WEBHOOK_API_KEY:'sepay-secret', ADMIN_TELEGRAM_ID:'42',
@@ -20,6 +21,7 @@ function d1TestDb() {
   sqlite.exec(schemaV2);
   sqlite.exec(schemaV3);
   sqlite.exec(schemaV4);
+  sqlite.exec(schemaV6);
   let batchQueue = Promise.resolve();
   return {
     raw:sqlite,
@@ -405,4 +407,60 @@ test('unknown Stars refund result becomes NEEDS_REVIEW and is never blindly re-t
   assert.equal(calls.filter(x=>x.method==='refundStarPayment').length,0,'mock only captures successful calls');
   await worker.fetch(command(526,'/refundreviews'),env,ctx);
   assert.ok(calls.at(-1).data.text.includes('NEEDS_REVIEW'));
+});
+
+test('language auto-detection and manual override persist across Telegram updates',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  const message=(update_id,text,code='en-US')=>telegramRequest({
+    update_id,message:{from:{id:701,language_code:code},chat:{id:701,type:'private'},text}
+  });
+  assert.equal((await worker.fetch(message(601,'/start'),env,ctx)).status,200);
+  assert.ok(calls.at(-1).data.text.includes('Welcome to ePlus'));
+  assert.deepEqual({...DB.raw.prepare('SELECT locale,source FROM user_locales WHERE user_id=?').get('701')},{
+    locale:'en',source:'auto'
+  });
+  await worker.fetch(message(602,'/language'),env,ctx);
+  assert.equal(calls.at(-1).data.reply_markup.inline_keyboard[0].length,2);
+  await worker.fetch(message(603,'/lang vi'),env,ctx);
+  assert.ok(calls.at(-1).data.text.includes('tiếng Việt'));
+  await worker.fetch(message(604,'/help'),env,ctx);
+  assert.ok(calls.at(-1).data.text.includes('Sản phẩm số'));
+  assert.equal(DB.raw.prepare("SELECT source FROM user_locales WHERE user_id='701'").get().source,'manual');
+  await worker.fetch(message(605,'/lang en','vi-VN'),env,ctx);
+  assert.ok(calls.at(-1).data.text.includes('Language set'));
+  await worker.fetch(message(606,'/catalog','vi-VN'),env,ctx);
+  assert.ok(calls.at(-1).data.text.includes('No products yet'));
+  await worker.fetch(telegramRequest({update_id:607,callback_query:{
+    id:'change-language',from:{id:701,language_code:'en-US'},
+    data:'lang:vi',message:{chat:{id:701,type:'private'}}
+  }}),env,ctx);
+  assert.equal(DB.raw.prepare("SELECT locale FROM user_locales WHERE user_id='701'").get().locale,'vi');
+});
+
+test('English buyers receive Stars invoice link and payment notification in English',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('License','digital',20)").run();
+  DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value) VALUES(1,'TEST-EN-KEY')").run();
+  const buy=telegramRequest({update_id:610,callback_query:{
+    id:'purchase-en',from:{id:702,language_code:'en'},data:'buy:1',
+    message:{chat:{id:702,type:'private'}}
+  }});
+  assert.equal((await worker.fetch(buy,env,ctx)).status,200);
+  assert.ok(calls.some(x=>x.method==='sendMessage'&&x.data.reply_markup?.inline_keyboard?.[0]?.[0]?.text==='⭐ Pay with Stars'));
+  const order=DB.raw.prepare('SELECT id FROM orders').get().id;
+  await worker.fetch(telegramRequest({update_id:611,message:{
+    from:{id:702,language_code:'en'},chat:{id:702,type:'private'},
+    successful_payment:{currency:'XTR',invoice_payload:order,total_amount:20,telegram_payment_charge_id:'en-charge-1'}
+  }}),env,ctx);
+  assert.ok(calls.some(x=>x.method==='sendMessage'&&x.data.text?.includes('Payment confirmed and delivered')));
+  assert.ok(calls.some(x=>x.method==='sendMessage'&&x.data.text?.includes('TEST-EN-KEY')));
+});
+
+test('automatic Vietnamese fallback for unsupported Telegram locales',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  await worker.fetch(telegramRequest({update_id:612,message:{
+    from:{id:703,language_code:'fr-FR'},chat:{id:703,type:'private'},text:'/help'
+  }}),env,ctx);
+  assert.ok(calls.at(-1).data.text.includes('Sản phẩm số'));
+  assert.equal(DB.raw.prepare("SELECT locale FROM user_locales WHERE user_id='703'").get().locale,'vi');
 });

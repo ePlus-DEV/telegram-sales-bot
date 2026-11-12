@@ -5,14 +5,16 @@ import {
 } from './auth.js';
 import {page,loginPage,dashboardPage} from './ui.js';
 import {validPositiveInt} from '../domain.js';
+import {adminLanguage,normalizeLanguage} from '../i18n.js';
+import {a} from './locales.js';
 
 const headers={'cache-control':'no-store, private','referrer-policy':'no-referrer'};
 function redirect(location,extra={}) {
   return new Response(null,{status:303,headers:{...headers,location,...extra}});
 }
-function errorPage(message,status=400) {
-  return page('<main class="shell"><h1>Yêu cầu không hợp lệ</h1><p>'+message+'</p>'
-    +'<p><a href="/admin">Quay lại Dashboard</a></p></main>',{status});
+function errorPage(message,status=400,lang='vi') {
+  return page('<main class="shell"><h1>Yêu cầu không hợp lệ</h1><p>'+a(lang,message)+'</p>'
+    +'<p><a href="/admin">Quay lại Dashboard</a></p></main>',{status,lang});
 }
 function validText(value,max) {
   const s=String(value??'').trim();
@@ -122,27 +124,36 @@ async function writeAction(env,path,form) {
 }
 
 export async function handleAdminRequest(request,env) {
-  const path=new URL(request.url).pathname;
-  if(!dashboardConfigured(env))return errorPage(
+  const url=new URL(request.url),path=url.pathname;
+  const lang=adminLanguage(request);
+  const fail=(message,status)=>errorPage(message,status,lang);
+  const persistLocale=response=>{
+    if(normalizeLanguage(url.searchParams.get('lang'))) {
+      response.headers.append('set-cookie','eplus_admin_lang='+lang
+        +'; Path=/admin; Max-Age=31536000; Secure; SameSite=Strict');
+    }
+    return response;
+  };
+  if(!dashboardConfigured(env))return fail(
     'Dashboard chưa bật. Cấu hình ADMIN_DASHBOARD_PASSWORD tối thiểu 16 ký tự trong hosting secrets.',503
   );
-  if(request.method!=='GET' && request.method!=='POST')return errorPage('Method not allowed',405);
+  if(request.method!=='GET' && request.method!=='POST')return fail('Method not allowed',405);
   if(request.method==='POST') {
-    if(!validOrigin(request))return errorPage('Origin verification failed',403);
+    if(!validOrigin(request))return fail('Origin verification failed',403);
     let form;
-    try {form=await parseAdminForm(request);}catch{return errorPage('Form bị lỗi hoặc quá lớn',413);}
+    try {form=await parseAdminForm(request);}catch{return fail('Form bị lỗi hoặc quá lớn',413);}
     if(path==='/admin/login') {
-      if(await loginBlocked(env,request))return errorPage('Đăng nhập tạm khóa. Thử lại sau 15 phút.',429);
+      if(await loginBlocked(env,request))return fail('Đăng nhập tạm khóa. Thử lại sau 15 phút.',429);
       if(!await passwordMatches(env,form.get('password'))) {
         await noteFailedLogin(env,request);
-        return errorPage('Mật khẩu không hợp lệ',401);
+        return fail('Mật khẩu không hợp lệ',401);
       }
       const session=await createSession(env,request);
-      return redirect('/admin',{'set-cookie':setSessionCookie(session.token)});
+      return redirect('/admin?lang='+lang,{'set-cookie':setSessionCookie(session.token)});
     }
     const session=await readSession(env,request);
-    if(!session)return errorPage('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.',401);
-    if(!validCsrf(session,form))return errorPage('CSRF verification failed',403);
+    if(!session)return fail('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.',401);
+    if(!validCsrf(session,form))return fail('CSRF verification failed',403);
     if(path==='/admin/logout') {
       await revokeSession(env,session);
       return redirect('/admin',{'set-cookie':clearSessionCookie()});
@@ -150,17 +161,16 @@ export async function handleAdminRequest(request,env) {
     try{return redirect(await writeAction(env,path,form));}
     catch(error) {
       console.error('Admin mutation rejected:',path,error.message);
-      return errorPage('Dữ liệu không hợp lệ hoặc thao tác không được phép',400);
+      return fail('Dữ liệu không hợp lệ hoặc thao tác không được phép',400);
     }
   }
-  if(path!=='/admin'&&path!=='/admin/login')return errorPage('Not found',404);
+  if(path!=='/admin'&&path!=='/admin/login')return fail('Not found',404);
   const session=await readSession(env,request);
-  if(!session)return loginPage();
-  if(path==='/admin/login')return redirect('/admin');
-  const url=new URL(request.url);
+  if(!session)return persistLocale(loginPage('',lang));
+  if(path==='/admin/login')return redirect('/admin?lang='+lang);
   const requested=url.searchParams.get('tab')||'overview';
   const tab=['overview','products','orders','reviews'].includes(requested)?requested:'overview';
   const notices={saved:'Đã lưu thay đổi.',fulfilled:'Đã đánh dấu đơn hoàn tất. Hãy xác nhận khách đã nhận hàng.',reviewed:'Đã ghi nhận đối soát; không tự hoàn tiền.'};
-  const flash=notices[url.searchParams.get('notice')]||'';
-  return dashboardPage(await dashboardData(env),session,tab,flash);
+  const flash=a(lang,notices[url.searchParams.get('notice')]||'');
+  return persistLocale(dashboardPage(await dashboardData(env),session,tab,flash,lang));
 }
