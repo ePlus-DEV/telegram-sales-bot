@@ -18,6 +18,7 @@ function d1TestDb() {
   sqlite.exec(schema);
   sqlite.exec(schemaV2);
   sqlite.exec(schemaV3);
+  let batchQueue = Promise.resolve();
   return {
     raw:sqlite,
     prepare(sql) {
@@ -32,15 +33,21 @@ function d1TestDb() {
       });
       return { bind:binding, first:async () => binding().first(), all:async () => binding().all(), run:async () => binding().run() };
     },
-    async batch(statements) {
-      // The Worker uses D1's atomic batch. The mock statements are already bound objects.
-      sqlite.exec('BEGIN');
-      try {
-        const out = [];
-        for (const statement of statements) out.push(await statement.run());
-        sqlite.exec('COMMIT');
-        return out;
-      } catch (err) { sqlite.exec('ROLLBACK'); throw err; }
+    batch(statements) {
+      // Single local SQLite connection: serialize writes as a D1/libSQL
+      // transactional service would, rather than nesting BEGIN across awaits.
+      const runBatch = async () => {
+        sqlite.exec('BEGIN');
+        try {
+          const out = [];
+          for (const statement of statements) out.push(await statement.run());
+          sqlite.exec('COMMIT');
+          return out;
+        } catch (err) { sqlite.exec('ROLLBACK'); throw err; }
+      };
+      const transaction = batchQueue.then(runBatch,runBatch);
+      batchQueue = transaction.catch(() => {});
+      return transaction;
     }
   };
 }
