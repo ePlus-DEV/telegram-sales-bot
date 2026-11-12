@@ -1,28 +1,27 @@
 import { createOrderId, orderPaymentMatches, validPositiveInt, vietQrUrl } from './domain.js';
 import { isExpired } from './reconciliation.js';
+import { t,money,languageForId } from './i18n.js';
 
-async function physicalReceipt(env, chatId, order, send) {
-  if (await isExpired(env,order.id)) return send(env,chatId,'Đơn '+order.id+' đã hết hạn. Không chuyển khoản; liên hệ hỗ trợ nếu đã chuyển tiền.');
-  if (order.status !== 'PENDING') {
-    return send(env,chatId,'Đơn ' + order.id + ' có trạng thái ' + order.status
-      + '. Không chuyển khoản lại; kiểm tra /orders hoặc liên hệ hỗ trợ.');
-  }
-  const qr = vietQrUrl(env,order.id,order.total_vnd);
-  return send(env,chatId,'Đơn ' + order.id + '\nSản phẩm: ' + order.name
-    + '\nSố tiền: ' + order.total_vnd.toLocaleString('vi-VN') + 'đ'
-    + '\nNgân hàng BIN: ' + env.BANK_BIN + '\nSTK: ' + env.BANK_ACCOUNT_NO
-    + '\nNội dung bắt buộc: ' + order.id + '\nQR: ' + qr
-    + '\nChỉ chuyển đúng số tiền/nội dung. Đơn được xử lý khi SePay xác nhận.');
+async function physicalReceipt(env, chatId, order, send,language) {
+  if(await isExpired(env,order.id))
+    return send(env,chatId,t(language,'physicalExpired',{id:order.id}));
+  if(order.status!=='PENDING')
+    return send(env,chatId,t(language,'physicalAlready',{id:order.id,status:order.status}));
+  const qr=vietQrUrl(env,order.id,order.total_vnd);
+  return send(env,chatId,t(language,'physicalReceipt',{
+    id:order.id,name:order.name,amount:money(language,order.total_vnd),
+    bin:env.BANK_BIN,account:env.BANK_ACCOUNT_NO,qr
+  }));
 }
 
-async function invoiceReceipt(env, chatId, order, telegram, send) {
-  if (await isExpired(env,order.id)) return send(env,chatId,'Đơn '+order.id+' đã hết hạn. Vui lòng tạo đơn Stars mới.');
+async function invoiceReceipt(env, chatId, order, telegram, send,language) {
+  if (await isExpired(env,order.id)) return send(env,chatId,t(language,'invoiceExpired',{id:order.id}));
   if (order.status !== 'PENDING') {
-    return send(env,chatId,'Đơn ' + order.id + ' đã được xử lý (' + order.status + '). Kiểm tra /orders hoặc /mykey ' + order.id);
+    return send(env,chatId,t(language,'invoiceAlready',{id:order.id,status:order.status}));
   }
   let intent = await env.DB.prepare('SELECT invoice_url FROM purchase_intents WHERE order_id=? AND user_id=?')
     .bind(order.id,String(order.user_id)).first();
-  if (!intent) return send(env,chatId,'Không tìm thấy hóa đơn. Liên hệ hỗ trợ.');
+  if (!intent) return send(env,chatId,t(language,'invoiceMissing'));
   let url = intent.invoice_url;
   if (!url) {
     // A temporary database lease prevents parallel requests from creating
@@ -34,8 +33,7 @@ async function invoiceReceipt(env, chatId, order, telegram, send) {
       + "AND (invoice_claimed_until IS NULL OR invoice_claimed_until<=CURRENT_TIMESTAMP)"
     ).bind(order.id).run();
     if (!claim.meta.changes) {
-      return send(env,chatId,'⏳ Hóa đơn ' + order.id
-        + ' đang được tạo. Dùng /invoice ' + order.id + ' để lấy lại link sau ít phút.');
+      return send(env,chatId,t(language,'invoiceCreating',{id:order.id}));
     }
     try {
       const response = await telegram(env,'createInvoiceLink',{
@@ -65,38 +63,38 @@ async function invoiceReceipt(env, chatId, order, telegram, send) {
     url = intent?.invoice_url;
   }
   if (!url) throw new Error('Invoice link was not persisted');
-  return send(env,chatId,'⭐ Đơn ' + order.id + '\n' + order.name + ' · '
-    + order.total_stars + ' Stars\nNhấn nút bên dưới để thanh toán. Xem lại: /invoice ' + order.id,{
-    reply_markup:{inline_keyboard:[[{text:'⭐ Thanh toán Stars',url}]]}
-  });
+  return send(env,chatId,t(language,'invoicePay',{
+    id:order.id,name:order.name,stars:order.total_stars
+  }),{reply_markup:{inline_keyboard:[[{text:t(language,'invoiceButton'),url}]]}});
 }
 
-async function presentOrder(env,chatId,orderId,telegram,send) {
+async function presentOrder(env,chatId,orderId,telegram,send,language) {
   const order = await env.DB.prepare(
     'SELECT o.*,p.name,p.description FROM orders o JOIN products p ON o.product_id=p.id WHERE o.id=?'
   ).bind(orderId).first();
-  if (!order) return send(env,chatId,'Đơn hàng không còn tồn tại. Liên hệ hỗ trợ.');
-  if (order.kind === 'physical') return physicalReceipt(env,chatId,order,send);
-  return invoiceReceipt(env,chatId,order,telegram,send);
+  if (!order) return send(env,chatId,t(language,'orderMissing'));
+  if (order.kind === 'physical') return physicalReceipt(env,chatId,order,send,language);
+  return invoiceReceipt(env,chatId,order,telegram,send,language);
 }
 
-export async function createPurchase(env,{callbackId,chatId,userId,productId},telegram,send) {
+export async function createPurchase(env,{callbackId,chatId,userId,productId},telegram,send,language) {
+  const lang=language||await languageForId(env,userId);
   const cb = String(callbackId || '');
   if (!cb || cb.length > 256 || !validPositiveInt(productId) || !validPositiveInt(userId,Number.MAX_SAFE_INTEGER))
-    return send(env,chatId,'Yêu cầu đặt hàng không hợp lệ.');
+    return send(env,chatId,t(lang,'invalidPurchase'));
   const first = await env.DB.prepare('SELECT * FROM purchase_intents WHERE callback_id=?').bind(cb).first();
   if (first) {
     if (first.user_id !== String(userId) || first.product_id !== productId || first.chat_id !== String(chatId))
-      return send(env,chatId,'Yêu cầu đặt hàng không khớp.');
-    return presentOrder(env,chatId,first.order_id,telegram,send);
+      return send(env,chatId,t(lang,'mismatchedPurchase'));
+    return presentOrder(env,chatId,first.order_id,telegram,send,lang);
   }
   const p = await env.DB.prepare('SELECT * FROM products WHERE id=? AND active=1').bind(productId).first();
-  if (!p) return send(env,chatId,'Không tìm thấy sản phẩm.');
+  if (!p) return send(env,chatId,t(lang,'productMissing'));
   const id = createOrderId();
   const physical = p.kind === 'physical';
   if (physical) {
     if (!env.SEPAY_WEBHOOK_API_KEY || !env.BANK_ACCOUNT_NO)
-      return send(env,chatId,'Thanh toán ngân hàng chưa được cấu hình.');
+      return send(env,chatId,t(lang,'bankNotConfigured'));
     // Validate destination config *before* creating an immutable order.
     vietQrUrl(env,id,p.price_vnd);
   }
@@ -128,20 +126,21 @@ export async function createPurchase(env,{callbackId,chatId,userId,productId},te
   }
   await env.DB.batch(steps);
   const actual = await env.DB.prepare('SELECT * FROM purchase_intents WHERE callback_id=?').bind(cb).first();
-  if (!actual) return send(env,chatId,physical?'Sản phẩm không còn khả dụng.':'Sản phẩm đã hết hàng.');
+  if (!actual) return send(env,chatId,t(lang,physical?'productUnavailable':'stockEmpty'));
   if (actual.user_id !== String(userId) || actual.product_id !== p.id || actual.chat_id !== String(chatId))
-    return send(env,chatId,'Yêu cầu đặt hàng không khớp.');
-  return presentOrder(env,chatId,actual.order_id,telegram,send);
+    return send(env,chatId,t(lang,'mismatchedPurchase'));
+  return presentOrder(env,chatId,actual.order_id,telegram,send,lang);
 }
 
-export async function recoverInvoice(env,chatId,userId,orderId,telegram,send) {
+export async function recoverInvoice(env,chatId,userId,orderId,telegram,send,language) {
+  const lang=language||await languageForId(env,userId);
   const id = String(orderId || '').trim();
   const intent = await env.DB.prepare(
     'SELECT pi.order_id FROM purchase_intents pi JOIN orders o ON o.id=pi.order_id '
       + "WHERE pi.order_id=? AND pi.user_id=? AND o.kind='digital'"
   ).bind(id,String(userId)).first();
-  if (!intent) return send(env,chatId,'Không tìm thấy hóa đơn của bạn.');
-  return presentOrder(env,chatId,intent.order_id,telegram,send);
+  if (!intent) return send(env,chatId,t(lang,'invoiceNotYours'));
+  return presentOrder(env,chatId,intent.order_id,telegram,send,lang);
 }
 
 export async function approvePrecheckout(env,query) {

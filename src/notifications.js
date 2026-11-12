@@ -1,3 +1,4 @@
+import {t,money,languageForId} from './i18n.js';
 // Durable payment notifications. Only the order reference goes into the outbox:
 // secret keys stay in digital_inventory and are looked up just before delivery.
 // Telegram does not support idempotent sendMessage; a crash after a successful
@@ -17,20 +18,19 @@ export async function enqueueNotification(env, orderId, kind, recipientId) {
   ).bind(orderId,kind,String(recipientId)).run();
 }
 
-function notificationText(row) {
-  if (row.kind === 'stars_key') {
-    if (!row.secret_value) throw new Error('Paid order is missing its delivered inventory key');
-    return '✅ Đã thanh toán và giao hàng.\nĐơn: ' + row.order_id
-      + '\nMã/Tài khoản:\n' + row.secret_value + '\nXem lại: /mykey ' + row.order_id;
+function notificationText(row,lang) {
+  if(row.kind==='stars_key') {
+    if(!row.secret_value)throw new Error('Paid order is missing its delivered inventory key');
+    return t(lang,'starsDelivered',{id:row.order_id,secret:row.secret_value});
   }
-  if (row.kind === 'stars_review_customer')
-    return '✅ Thanh toán thành công. Đơn ' + row.order_id + ' đang chờ hỗ trợ giao hàng. Dùng /paysupport.';
-  if (row.kind === 'stars_review_admin')
-    return '⚠️ Đơn Stars ' + row.order_id + ' đã thanh toán nhưng chưa giao được. Kiểm tra kho hàng và /retryalerts.';
-  if (row.kind === 'physical_paid_customer')
-    return '✅ Đã nhận ' + row.total_vnd.toLocaleString('vi-VN') + 'đ cho đơn ' + row.order_id + '. Đơn đang chờ giao hàng.';
-  if (row.kind === 'physical_paid_admin')
-    return '📦 Đơn vật lý đã thanh toán: ' + row.order_id + '\nDùng /fulfill ' + row.order_id + ' sau khi giao.';
+  if(row.kind==='stars_review_customer')
+    return t(lang,'starsAwaitDelivery',{id:row.order_id});
+  if(row.kind==='stars_review_admin')
+    return t(lang,'starsAdminAlert',{id:row.order_id});
+  if(row.kind==='physical_paid_customer')
+    return t(lang,'physicalPaidCustomer',{id:row.order_id,amount:money(lang,row.total_vnd)});
+  if(row.kind==='physical_paid_admin')
+    return t(lang,'physicalPaidAdmin',{id:row.order_id});
   throw new Error('Unknown notification kind');
 }
 
@@ -63,7 +63,8 @@ export async function flushNotifications(env, send, { orderId = null, limit = 20
     ).bind(row.id).run();
     if (!lease.meta.changes) continue;
     try {
-      await send(env,row.recipient_id,notificationText(row));
+      const lang=await languageForId(env,row.recipient_id);
+      await send(env,row.recipient_id,notificationText(row,lang));
       await env.DB.prepare(
         "UPDATE notification_outbox SET state='SENT',sent_at=CURRENT_TIMESTAMP,lease_until=NULL WHERE id=? AND state='SENDING'"
       ).bind(row.id).run();
