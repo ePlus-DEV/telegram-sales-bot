@@ -22,6 +22,8 @@ const en = {
   'Sửa sản phẩm':'Edit product',
   'Tên sản phẩm':'Product name',
   'Giá (':'Price (',
+  'Giá (VND)':'Price (VND)',
+  'Giá (Stars)':'Price (Stars)',
   'Trạng thái':'Status',
   'Ẩn khỏi catalog':'Hide from catalog',
   'Mô tả':'Description',

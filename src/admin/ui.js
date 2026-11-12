@@ -1,4 +1,4 @@
-import {translateAdminHtml} from './locales.js';
+import {translateAdminHtml,a} from './locales.js';
 // Intentionally no browser JavaScript: all mutations use server-side POST,
 // CSRF tokens, strict Content Security Policy and HTML escaping.
 export function html(value) {
@@ -31,16 +31,16 @@ export function page(body,{status=200,extraHeaders={},lang='vi'}={}) {
     {status,headers:{...headers,...extraHeaders}});
 }
 function hidden(csrf){return '<input type="hidden" name="csrf" value="'+html(csrf)+'">';}
-function input(label,name,value='',type='text',extra=''){
-  return '<label>'+html(label)+'<input name="'+html(name)+'" type="'+html(type)+'" value="'+html(value)+'" '+extra+'></label>';
+function input(label,name,value='',type='text',extra='',lang='vi'){
+  return '<label>'+html(a(lang,label))+'<input name="'+html(name)+'" type="'+html(type)+'" value="'+html(value)+'" '+extra+'></label>';
 }
 const money=n=>Number(n||0).toLocaleString('vi-VN');
 const statusText={PENDING:'Chờ thanh toán',PAID:'Đã thanh toán',FULFILLED:'Hoàn tất',EXPIRED:'Hết hạn'};
 const kindText={digital:'Sản phẩm số',physical:'Hàng vật lý'};
-function statusPill(status){return '<span class="pill '+(status==='FULFILLED'?'good':status==='PAID'?'warning':'')+'">'+html(statusText[status]||status)+'</span>';}
-function layout(title,body){
+function statusPill(status,lang='vi'){return '<span class="pill '+(status==='FULFILLED'?'good':status==='PAID'?'warning':'')+'">'+html(a(lang,statusText[status]||status))+'</span>';}
+function layout(title,body,lang='vi'){
   return '<div class="shell"><header class="top"><div class="brand"><div class="logo">e+</div><div>'
-    + '<div class="eyebrow">ePlus.DEV / Commerce</div><div class="heading">'+html(title)+'</div>'
+    + '<div class="eyebrow">ePlus.DEV / Commerce</div><div class="heading">'+html(a(lang,title))+'</div>'
     + '<div class="subtitle">Telegram Sales Bot · Self-hosted</div></div></div>'
     + '<div class="tablinks" aria-label="Language">'
     + '<a href="/admin?lang=vi" lang="vi">🇻🇳 Tiếng Việt</a>'
@@ -64,12 +64,12 @@ function stockForm(product,csrf){
     + '<input aria-label="Key mới cho '+html(product.name)+'" required name="key" placeholder="Key mới" maxlength="2000" autocomplete="off">'
     + '<button class="secondary" type="submit">Nhập</button></form>';
 }
-function renderProducts(products,csrf){
+function renderProducts(products,csrf,lang='vi'){
   const rows=products.map(p=>{
     const total=Number(p.total_keys||0),ready=Number(p.ready_keys||0);
     const price=p.kind==='digital'?p.price_stars:p.price_vnd;
     return '<tr><td><strong>#'+p.id+' · '+html(p.name)+'</strong><div class="mini">'+html(p.description)+'</div></td>'
-      +'<td>'+html(kindText[p.kind]||p.kind)+'</td><td>'+money(price)+(p.kind==='digital'?' ⭐':' đ')+'</td>'
+      +'<td>'+html(a(lang,kindText[p.kind]||p.kind))+'</td><td>'+money(price)+(p.kind==='digital'?' ⭐':' đ')+'</td>'
       +'<td>'+(p.kind==='digital'?ready+' sẵn / '+total+' tổng':'—')+'</td>'
       +'<td><span class="pill '+(p.active?'good':'')+'">'+(p.active?'Đang bán':'Đã ẩn')+'</span></td>'
       +'</tr>';
@@ -77,8 +77,8 @@ function renderProducts(products,csrf){
   const edit=products.map(p=>'<details class="panel"><summary><strong>#'+p.id+' · '+html(p.name)+'</strong> · Sửa sản phẩm</summary>'
     +'<form action="/admin/products/update" method="post" class="grid" style="margin-top:14px">'+hidden(csrf)
     +'<input type="hidden" name="id" value="'+p.id+'">'
-    +input('Tên sản phẩm','name',p.name,'text','required maxlength="80"')
-    +input('Giá ('+(p.kind==='digital'?'Stars':'VND')+')','price',p.kind==='digital'?p.price_stars:p.price_vnd,'number','required min="1"')
+    +input('Tên sản phẩm','name',p.name,'text','required maxlength="80"',lang)
+    +input('Giá ('+(p.kind==='digital'?'Stars':'VND')+')','price',p.kind==='digital'?p.price_stars:p.price_vnd,'number','required min="1"',lang)
     +'<label>Trạng thái<select name="active"><option value="1" '+(p.active?'selected':'')+'>Đang bán</option>'
     +'<option value="0" '+(!p.active?'selected':'')+'>Ẩn khỏi catalog</option></select></label>'
     +'<label class="full">Mô tả<textarea name="description" rows="2" maxlength="240">'+html(p.description)+'</textarea></label>'
@@ -86,9 +86,9 @@ function renderProducts(products,csrf){
     +(p.kind==='digital'?'<div style="margin-top:14px">'+stockForm(p,csrf)+'</div>':'')+'</details>').join('');
   return '<section class="panel"><div class="panelhead"><h2>Thêm sản phẩm</h2><span class="mini">Phân tách hàng vật lý / sản phẩm số</span></div>'
     +'<form method="post" action="/admin/products/create" class="grid">'+hidden(csrf)
-    +input('Tên sản phẩm','name','','text','required maxlength="80"')
+    +input('Tên sản phẩm','name','','text','required maxlength="80"',lang)
     +'<label>Loại<select name="kind"><option value="physical">Hàng vật lý · VND</option><option value="digital">Sản phẩm số · Stars</option></select></label>'
-    +input('Giá (VND hoặc Stars theo loại)','price','','number','required min="1" max="999999999"')
+    +input('Giá (VND hoặc Stars theo loại)','price','','number','required min="1" max="999999999"',lang)
     +'<label class="full">Mô tả<textarea name="description" rows="2" maxlength="240" placeholder="Mô tả hiển thị cho khách"></textarea></label>'
     +'<div><button>Tạo sản phẩm</button></div></form></section>'
     +'<section class="panel"><div class="panelhead"><h2>Sản phẩm & kho</h2><span class="mini">Hiển thị tối đa 50 mục</span></div>'
@@ -97,13 +97,13 @@ function renderProducts(products,csrf){
     +'<section><h2 style="margin:22px 0">Chỉnh sửa & nhập key</h2>'+edit
     +'<p class="help">Mã key không được hiện lại trên dashboard sau khi nhập. Tránh nhập tài khoản hoặc thông tin không được phép phân phối.</p></section>';
 }
-function renderOrders(orders,csrf){
+function renderOrders(orders,csrf,lang='vi'){
   return '<section class="panel"><div class="panelhead"><h2>Đơn hàng gần đây</h2><span class="mini">Tối đa 50 đơn · Không hiển thị nội dung key</span></div>'
     +'<div class="tablewrap"><table><thead><tr><th>Đơn</th><th>Khách Telegram</th><th>Loại</th><th>Số tiền</th><th>Trạng thái / thao tác</th></tr></thead><tbody>'
     +(orders.map(o=>'<tr><td><code>'+html(o.id)+'</code><div class="mini">'+html(o.created_at)+'</div></td>'
-      +'<td><code>'+html(o.user_id)+'</code></td><td>'+html(kindText[o.kind])+'</td>'
+      +'<td><code>'+html(o.user_id)+'</code></td><td>'+html(a(lang,kindText[o.kind]))+'</td>'
       +'<td>'+money(o.kind==='digital'?o.total_stars:o.total_vnd)+(o.kind==='digital'?' ⭐':' đ')+'</td>'
-      +'<td>'+statusPill(o.display_status)
+      +'<td>'+statusPill(o.display_status,lang)
       +(o.kind==='physical'&&o.status==='PAID'
         ?'<form method="post" action="/admin/orders/fulfill" class="actions" style="margin-top:9px">'+hidden(csrf)
         +'<input type="hidden" name="order_id" value="'+html(o.id)+'">'
@@ -111,7 +111,7 @@ function renderOrders(orders,csrf){
       ||'<tr><td colspan="5" class="muted">Chưa có đơn hàng</td></tr>')
     +'</tbody></table></div><p class="help">Đánh dấu đã giao chỉ cập nhật đơn; liên hệ khách để xác nhận việc giao hàng thực tế.</p></section>';
 }
-function renderReviews(banks,refunds,csrf){
+function renderReviews(banks,refunds,csrf,lang='vi'){
   return '<section class="panel"><div class="panelhead"><h2>Giao dịch ngân hàng cần đối soát</h2><span class="mini">Không tự hoàn hoặc ghi có tiền</span></div>'
     +'<div class="tablewrap"><table><thead><tr><th>SePay ID</th><th>Đơn</th><th>VND</th><th>Lý do</th><th>Thao tác</th></tr></thead><tbody>'
     +(banks.map(x=>'<tr><td>'+html(x.event_id)+'</td><td><code>'+html(x.order_id)+'</code></td><td>'+money(x.amount_vnd)+'</td>'
@@ -121,7 +121,7 @@ function renderReviews(banks,refunds,csrf){
     +'</tbody></table></div></section>'
     +'<section class="panel"><div class="panelhead"><h2>Hoàn Stars cần kiểm tra</h2><span class="mini">Chỉ xem · Không gọi lại hoàn tiền</span></div>'
     +'<div class="tablewrap"><table><thead><tr><th>Đơn</th><th>Trạng thái hoàn</th><th>Ngày yêu cầu</th></tr></thead><tbody>'
-    +(refunds.map(x=>'<tr><td><code>'+html(x.order_id)+'</code></td><td>'+statusPill(x.state)+'</td><td>'+html(x.requested_at)+'</td></tr>').join('')
+    +(refunds.map(x=>'<tr><td><code>'+html(x.order_id)+'</code></td><td>'+statusPill(x.state,lang)+'</td><td>'+html(x.requested_at)+'</td></tr>').join('')
       ||'<tr><td colspan="3" class="muted">Không có yêu cầu cần xác minh</td></tr>')
     +'</tbody></table></div></section>';
 }
@@ -135,12 +135,12 @@ export function dashboardPage(data,session,tab='overview',flash='',lang='vi') {
     +navTab('orders','Đơn hàng',tab)+navTab('reviews','Đối soát',tab)+'</nav>';
   const info='<section class="panel"><h2>Tình trạng cửa hàng</h2><p class="help">Các khoản tiền vẫn phải được xác minh qua webhook và ledger. '
     +'Không thể hoàn tiền hoặc sửa số dư bằng thao tác dashboard. Quản trị viên cần xử lý các ca ngoại lệ ở mục Đối soát.</p></section>';
-  const section=tab==='products'?renderProducts(data.products,session.csrf_token)
-    :tab==='orders'?renderOrders(data.orders,session.csrf_token)
-    :tab==='reviews'?renderReviews(data.banks,data.refunds,session.csrf_token)
-    :info+renderOrders(data.orders.slice(0,10),session.csrf_token);
+  const section=tab==='products'?renderProducts(data.products,session.csrf_token,lang)
+    :tab==='orders'?renderOrders(data.orders,session.csrf_token,lang)
+    :tab==='reviews'?renderReviews(data.banks,data.refunds,session.csrf_token,lang)
+    :info+renderOrders(data.orders.slice(0,10),session.csrf_token,lang);
   const logout='<form method="post" action="/admin/logout" class="actions" style="margin-top:18px">'
     +hidden(session.csrf_token)+'<button type="submit" class="secondary">Đăng xuất phiên này</button></form>';
   return page(layout('Bảng điều khiển',navigation+stats
-    +(flash?'<div class="flash" role="status">'+html(flash)+'</div>':'')+section+logout),{lang});
+    +(flash?'<div class="flash" role="status">'+html(flash)+'</div>':'')+section+logout,lang),{lang});
 }
