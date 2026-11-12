@@ -7,6 +7,7 @@ import worker from '../src/index.js';
 const schema = readFileSync(new URL('../migrations/0001_initial.sql', import.meta.url),'utf8');
 const schemaV2 = readFileSync(new URL('../migrations/0002_notification_outbox.sql', import.meta.url),'utf8');
 const schemaV3 = readFileSync(new URL('../migrations/0003_purchase_intents.sql', import.meta.url),'utf8');
+const schemaV4 = readFileSync(new URL('../migrations/0004_payment_reconciliation.sql', import.meta.url),'utf8');
 const envDefaults = {
   BOT_TOKEN:'fake_test_bot_token', TELEGRAM_WEBHOOK_SECRET:'known-secret',
   SEPAY_WEBHOOK_API_KEY:'sepay-secret', ADMIN_TELEGRAM_ID:'42',
@@ -18,6 +19,7 @@ function d1TestDb() {
   sqlite.exec(schema);
   sqlite.exec(schemaV2);
   sqlite.exec(schemaV3);
+  sqlite.exec(schemaV4);
   let batchQueue = Promise.resolve();
   return {
     raw:sqlite,
@@ -291,4 +293,116 @@ test('a paid physical order never re-displays the bank QR on callback replay',as
   const last=calls.filter(c=>c.method==='sendMessage').at(-1).data.text;
   assert.match(last,/Không chuyển khoản lại/);
   assert.ok(!last.includes('QR:'));
+});
+
+// Payment reconciliation tests use a real in-memory SQLite schema and mock Telegram API.
+test('unapproved expired Stars reservation releases key and checkout is refused', async t=>{
+  const calls=mockTelegram(t), DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Expired license','digital',20)").run();
+  DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value) VALUES(1,'RESERVED-KEY')").run();
+  const buy={update_id:501,callback_query:{id:'buy-expire',from:{id:87},data:'buy:1',message:{chat:{id:87,type:'private'}}}};
+  await worker.fetch(telegramRequest(buy),env,ctx);
+  const order=DB.raw.prepare('SELECT * FROM orders').get();
+  DB.raw.prepare("UPDATE orders SET created_at=datetime('now','-2 days') WHERE id=?").run(order.id);
+  const result=await worker.scheduled({},env,ctx);
+  await ctx.done();
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM order_expirations WHERE order_id=?').get(order.id).n,1);
+  assert.equal(DB.raw.prepare('SELECT reserved_order_id FROM digital_inventory').get().reserved_order_id,null);
+  await worker.fetch(telegramRequest({update_id:502,pre_checkout_query:{
+    id:'expired-precheck',from:{id:87},currency:'XTR',invoice_payload:order.id,total_amount:20
+  }}),env,ctx);
+  assert.equal(calls.filter(x=>x.method==='answerPreCheckoutQuery').at(-1).data.ok,false);
+  await worker.fetch(telegramRequest({update_id:503,message:{chat:{id:87,type:'private'},from:{id:87},text:'/invoice '+order.id}}),env,ctx);
+  assert.ok(calls.at(-1).data.text.includes('hết hạn'));
+});
+
+test('authorized Stars checkout is never automatically expired even if very old',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Hold','digital',9)").run();
+  DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value) VALUES(1,'HELD')").run();
+  await worker.fetch(telegramRequest({update_id:504,callback_query:{id:'buy-held',from:{id:70},data:'buy:1',message:{chat:{id:70,type:'private'}}}}),env,ctx);
+  const order=DB.raw.prepare('SELECT * FROM orders').get();
+  await worker.fetch(telegramRequest({update_id:505,pre_checkout_query:{id:'approved-one',from:{id:70},currency:'XTR',invoice_payload:order.id,total_amount:9}}),env,ctx);
+  assert.equal(calls.filter(x=>x.method==='answerPreCheckoutQuery').at(-1).data.ok,true);
+  DB.raw.prepare("UPDATE orders SET created_at=datetime('now','-7 days') WHERE id=?").run(order.id);
+  await worker.scheduled({},env,ctx);await ctx.done();
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM order_expirations').get().n,0);
+  assert.equal(DB.raw.prepare('SELECT reserved_order_id FROM digital_inventory').get().reserved_order_id,order.id);
+});
+
+test('late and mismatched SePay deposits are reviewed, not automatically credited',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_vnd) VALUES('Poster','physical',10000)").run();
+  await worker.fetch(telegramRequest({update_id:506,callback_query:{id:'buy-poster',from:{id:88},data:'buy:1',message:{chat:{id:88,type:'private'}}}}),env,ctx);
+  const order=DB.raw.prepare('SELECT * FROM orders').get();
+  const tx={id:800,transferType:'in',accountNumber:'12345678',transferAmount:10000,content:'PAY '+order.id};
+  const wrong=await worker.fetch(sepayRequest({...tx,id:801,transferAmount:9000}),env,ctx);
+  assert.equal((await wrong.json()).review,true);
+  DB.raw.prepare("UPDATE orders SET created_at=datetime('now','-2 hours') WHERE id=?").run(order.id);
+  await worker.scheduled({},env,ctx);await ctx.done();
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM order_expirations').get().n,1);
+  const late=await worker.fetch(sepayRequest(tx),env,ctx);
+  assert.equal((await late.json()).review,true);
+  assert.equal(DB.raw.prepare('SELECT status FROM orders').get().status,'PENDING');
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM payment_events').get().n,0);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM bank_payment_reviews').get().n,2);
+  await worker.fetch(sepayRequest(tx),env,ctx);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM bank_payment_reviews').get().n,2);
+  await worker.fetch(telegramRequest({update_id:507,message:{chat:{id:42,type:'private'},from:{id:42},text:'/bankreviews'}}),env,ctx);
+  assert.ok(calls.at(-1).data.text.includes('EXPIRED_ORDER'));
+  await worker.fetch(telegramRequest({update_id:508,message:{chat:{id:42,type:'private'},from:{id:42},text:'/ackbank 800'}}),env,ctx);
+  assert.ok(DB.raw.prepare('SELECT acknowledged_at FROM bank_payment_reviews WHERE event_id=?').get('800').acknowledged_at);
+});
+
+test('Stars payment received after expiry is held for manual review, not given a reused key',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Late key','digital',35)").run();
+  DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value) VALUES(1,'ONE-KEY')").run();
+  await worker.fetch(telegramRequest({update_id:510,callback_query:{id:'late-key',from:{id:89},data:'buy:1',message:{chat:{id:89,type:'private'}}}}),env,ctx);
+  const order=DB.raw.prepare('SELECT * FROM orders').get();
+  DB.raw.prepare("UPDATE orders SET created_at=datetime('now','-2 days') WHERE id=?").run(order.id);
+  await worker.scheduled({},env,ctx);await ctx.done();
+  await worker.fetch(telegramRequest({update_id:511,message:{chat:{id:89,type:'private'},from:{id:89},successful_payment:{
+    currency:'XTR',invoice_payload:order.id,total_amount:35,telegram_payment_charge_id:'late-charge'
+  }}}),env,ctx);
+  assert.equal(DB.raw.prepare('SELECT status FROM orders').get().status,'PAID');
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM digital_inventory WHERE delivered_order_id IS NOT NULL').get().n,0);
+  assert.ok(calls.some(x=>x.method==='sendMessage' && x.data.text?.includes('chờ hỗ trợ giao hàng')));
+});
+
+test('admin Stars refund is one-shot; fulfilled goods cannot be refunded automatically',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Refundable','digital',50)").run();
+  DB.raw.prepare("INSERT INTO orders(id,user_id,product_id,kind,provider,total_stars,status,payment_ref) VALUES('E111111111111','91',1,'digital','stars',50,'PAID','charge-refund-a')").run();
+  const cmd=(n,text,admin=true)=>({update_id:n,message:{chat:{id:admin?42:99,type:'private'},from:{id:admin?42:99},text}});
+  await worker.fetch(telegramRequest(cmd(520,'/refundstars E111111111111',false)),env,ctx);
+  assert.equal(calls.filter(x=>x.method==='refundStarPayment').length,0);
+  await worker.fetch(telegramRequest(cmd(521,'/refundstars E111111111111')),env,ctx);
+  assert.equal(calls.filter(x=>x.method==='refundStarPayment').length,1);
+  assert.deepEqual(calls.find(x=>x.method==='refundStarPayment').data,{
+    user_id:91,telegram_payment_charge_id:'charge-refund-a'
+  });
+  assert.equal(DB.raw.prepare('SELECT state FROM star_refunds').get().state,'CONFIRMED');
+  await worker.fetch(telegramRequest(cmd(522,'/refundstars E111111111111')),env,ctx);
+  assert.equal(calls.filter(x=>x.method==='refundStarPayment').length,1);
+  DB.raw.prepare("INSERT INTO orders(id,user_id,product_id,kind,provider,total_stars,status,payment_ref) VALUES('E222222222222','92',1,'digital','stars',50,'FULFILLED','charge-b')").run();
+  await worker.fetch(telegramRequest(cmd(523,'/refundstars E222222222222')),env,ctx);
+  assert.equal(calls.filter(x=>x.method==='refundStarPayment').length,1);
+});
+
+test('unknown Stars refund result becomes NEEDS_REVIEW and is never blindly re-tried',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Key','digital',50)").run();
+  DB.raw.prepare("INSERT INTO orders(id,user_id,product_id,kind,provider,total_stars,status,payment_ref) VALUES('E333333333333','93',1,'digital','stars',50,'PAID','charge-unknown')").run();
+  const original=globalThis.fetch;
+  globalThis.fetch=(url,opts)=>String(url).endsWith('/refundStarPayment') ?
+    Response.json({ok:false,description:'timeout'},{status:504}) : original(url,opts);
+  const command=(n,text)=>telegramRequest({update_id:n,message:{chat:{id:42,type:'private'},from:{id:42},text}});
+  assert.equal((await worker.fetch(command(524,'/refundstars E333333333333'),env,ctx)).status,200);
+  assert.equal(DB.raw.prepare('SELECT state FROM star_refunds').get().state,'NEEDS_REVIEW');
+  await worker.fetch(command(525,'/refundstars E333333333333'),env,ctx);
+  assert.equal(DB.raw.prepare('SELECT COUNT(*) AS n FROM star_refunds').get().n,1);
+  assert.equal(calls.filter(x=>x.method==='refundStarPayment').length,0,'mock only captures successful calls');
+  await worker.fetch(command(526,'/refundreviews'),env,ctx);
+  assert.ok(calls.at(-1).data.text.includes('NEEDS_REVIEW'));
 });

@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/index.js && node --check src/purchase.js && node --check src/domain.js && node --check src/runtime.js && node --check src/server.js && node --check src/adapters/turso.js && node --check scripts/register-webhook.mjs && node --check scripts/migrate-turso.mjs && node --check api/healthz.js && node --check api/telegram-webhook.js && node --check api/sepay-webhook.js",
+    "check": "node --check src/index.js && node --check src/purchase.js && node --check src/reconciliation.js && node --check src/domain.js && node --check src/runtime.js && node --check src/server.js && node --check src/adapters/turso.js && node --check scripts/register-webhook.mjs && node --check scripts/migrate-turso.mjs && node --check api/healthz.js && node --check api/telegram-webhook.js && node --check api/sepay-webhook.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "start": "node src/server.js",

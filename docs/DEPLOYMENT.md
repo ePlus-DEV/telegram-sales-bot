@@ -129,3 +129,11 @@ This calls Telegram `setWebhook` to register `https://your-service.example/teleg
 - **GitHub Actions:** CI validates code; it does not deploy to third-party platforms without configured secrets/accounts.
 
 For payments, server availability and post-payment notifications matter at least as much as having a successful health check.
+
+## P0 maintenance after 0004 migration
+
+**Always run database migrations before swapping a live deployment**: the running code requires `order_expirations`, `bank_payment_reviews` and `star_refunds`.
+
+Cloudflare Workers will expire unapproved orders and retry payment notification every 5 minutes via `[triggers]` cron. On Vercel/Railway/Render/Koyeb/Docker this HTTP app does not include a scheduled daemon; admins must run `/expireorders` and `/retryalerts` or configure a trusted scheduled operator. Never turn an untrusted public endpoint into a maintenance trigger.
+
+To review late bank deposits use `/bankreviews`; `ackbank` is merely an acknowledgement of human reconciliation and **does not** refund money. To refund a Stars charge for a PAID, undelivered digital order use `/refundstars ORDER_ID`; if the result is `NEEDS_REVIEW`, inspect Telegram records before any manual action. Fulfilled orders cannot be refunded by this automated command.

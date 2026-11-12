@@ -50,6 +50,21 @@ Digital products use `createInvoiceLink` and persist the Telegram Stars invoice 
 
 **Remaining limitation:** a first approved checkout that never completes remains locked to that query; issue #5 will add expiration and reconciliation. Users can place a separate new order with a new Buy callback; already-approved orders must be reconciled before inventory is released.
 
+### Payment expiration, late-bank review and Stars refund safeguards (P0)
+
+Apply migration `0004_payment_reconciliation.sql` **before deploying this version**. Cloudflare D1: `npm run db:migrate`; Vercel, Railway, Render, Koyeb and Docker with Turso: `npm run db:migrate:turso`. Take a database backup first.
+
+- **Unapproved PENDING orders only:** after **30 minutes** (physical) or **24 hours** (Stars), the Cloudflare cron marks them expired. Digital keys are returned to stock only if no Stars `pre_checkout_query` was ever approved. Customize with optional `PHYSICAL_ORDER_TTL_MINUTES` and `STARS_ORDER_TTL_MINUTES` (5–10080 minutes). Values outside this range use safe defaults.
+- **Previously approved Stars checkouts never auto-expire or release stock.** Telegram can finish an approved payment asynchronously. Admins must reconcile abandoned approvals manually; do not forcibly release their reserved keys. Telegram requires answering pre-checkout within 10 seconds.
+- **Expired invoices** no longer return pay links or QR prompts. Any unexpected Stars payment arriving after expiry is recorded as paid, **not silently discarded**, but key delivery is blocked and sent to manual review.
+- **SePay late/mismatched deposits** (unknown order, wrong amount, expired order, already paid) are logged in `bank_payment_reviews` by unique SePay transaction ID and are **not** credited automatically. Run `/bankreviews` to view, `/ackbank ID` after external reconciliation to mark reviewed. Acknowledging alone does **not** issue a bank refund or credit.
+- **Stars refunds:** Admin `/refundstars ORDER_ID` invokes the official `refundStarPayment` only for a paid but **not fulfilled** digital order and locks the order before the request. A successful API result is recorded as `CONFIRMED`. An unknown/error result becomes `NEEDS_REVIEW` (or stays `CALLING` after process failure), visible via `/refundreviews`; the app **never automatically repeats a refund API call**. Reconcile with Telegram before deciding whether any further manual action is necessary.
+- **Maintenance:** Cloudflare cron runs expiry and notification outbox every five minutes. On other hosts, admin can run `/expireorders` and `/retryalerts`; add a trusted external scheduler only after securely configuring operations. Do **not** rely on ephemeral files for payment records.
+
+New admin commands: `/expireorders`, `/bankreviews`, `/ackbank TRANSACTION_ID`, `/refundstars ORDER_ID`, `/refundreviews`. **Bank refunds remain manual through your bank/payment provider.**
+
+Current limitations: no live gateway test was performed; no automatic reconciliation of approved but abandoned Stars checkouts; no automatic bank refund; no Telegram refund status polling. Do not mark the product production-ready yet. Telegram reference: https://core.telegram.org/bots/api#refundstarpayment and https://core.telegram.org/bots/payments-stars. SePay reference: https://docs.sepay.vn/tich-hop-webhooks.html.
+
 ## What works
 
 | Feature | MVP |
@@ -195,7 +210,8 @@ For webhook testing you need an HTTPS endpoint reachable by Telegram/SePay; loca
 
 - [x] Durable payment-notification outbox, retry via webhook replay, Cloudflare cron and admin `/retryalerts`
 - [ ] Idempotent Telegram update consumption (non-payment callbacks)
-- [ ] Digital-item reservations TTL, cancellations, refunds, and recovery after delivery failure
+- [x] Unapproved order expiration, late SePay review and one-shot admin Stars refund request
+- [ ] Automatic reconciliation for approved-but-abandoned Stars checkout and full refund/customer dispute workflow
 - [ ] Shipping addresses, physical inventory, stock reservation, and fulfillment tracking
 - [ ] Admin dashboard protected with strong authentication, audit trail and rate limits
 - [ ] payOS for **physical** goods; optional other compliant gateways

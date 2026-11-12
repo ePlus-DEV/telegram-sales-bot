@@ -1,6 +1,8 @@
 import { createOrderId, orderPaymentMatches, validPositiveInt, vietQrUrl } from './domain.js';
+import { isExpired } from './reconciliation.js';
 
 async function physicalReceipt(env, chatId, order, send) {
+  if (await isExpired(env,order.id)) return send(env,chatId,'Đơn '+order.id+' đã hết hạn. Không chuyển khoản; liên hệ hỗ trợ nếu đã chuyển tiền.');
   if (order.status !== 'PENDING') {
     return send(env,chatId,'Đơn ' + order.id + ' có trạng thái ' + order.status
       + '. Không chuyển khoản lại; kiểm tra /orders hoặc liên hệ hỗ trợ.');
@@ -14,6 +16,7 @@ async function physicalReceipt(env, chatId, order, send) {
 }
 
 async function invoiceReceipt(env, chatId, order, telegram, send) {
+  if (await isExpired(env,order.id)) return send(env,chatId,'Đơn '+order.id+' đã hết hạn. Vui lòng tạo đơn Stars mới.');
   if (order.status !== 'PENDING') {
     return send(env,chatId,'Đơn ' + order.id + ' đã được xử lý (' + order.status + '). Kiểm tra /orders hoặc /mykey ' + order.id);
   }
@@ -160,6 +163,7 @@ export async function approvePrecheckout(env,query) {
     + 'AND (checkout_query_id IS NULL OR checkout_query_id=?) '
     + 'AND EXISTS(SELECT 1 FROM digital_inventory WHERE reserved_order_id=?) '
     + "AND EXISTS(SELECT 1 FROM orders WHERE id=? AND status='PENDING')"
-  ).bind(String(query.id),order.id,String(query.id),order.id,order.id).run();
+    + 'AND NOT EXISTS(SELECT 1 FROM order_expirations WHERE order_id=?)'
+  ).bind(String(query.id),order.id,String(query.id),order.id,order.id,order.id).run();
   return !!updated.meta.changes;
 }

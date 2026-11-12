@@ -15,3 +15,9 @@ For a vulnerability, do **not** post tokens, customer keys, bank transactions, o
 - Add rate limiting, admin audit log, inventory encryption and a proper refund/cancellation flow before handling sensitive credentials or scaling up.
 
 Do not enable live transactions until a security and operations review is complete.
+
+## Payment reconciliation
+- Keep pending approvals reserved; never release keys based only on age after a Stars pre-checkout was approved.
+- Verify Stars refund outcomes in Telegram if the API times out; do not retry an unknown refund automatically.
+- Review unallocated/late bank transfers through `/bankreviews`; `/ackbank` records human review only.
+- Run migration 0004 before deploying, and verify the Cloudflare scheduled worker or an equivalent trusted maintenance process.

@@ -1,6 +1,7 @@
 import { constantTimeEqual, validPositiveInt, sepayPayment } from './domain.js';
 import { createPurchase, recoverInvoice, approvePrecheckout } from './purchase.js';
 import { enqueueNotification, flushNotifications } from './notifications.js';
+import { expirePendingOrders, recordBankReview, listBankReviews, acknowledgeBankReview, listRefundReviews, refundPaidStars } from './reconciliation.js';
 
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
@@ -33,12 +34,19 @@ async function catalog(env, chatId) {
 }
 
 async function listOrders(env, chatId, userId, admin = false) {
+  const projection = "SELECT o.id,o.user_id,o.kind,o.status,o.total_vnd,o.total_stars,"
+    + "CASE WHEN r.state='CONFIRMED' THEN 'REFUNDED' "
+    + "WHEN r.state IS NOT NULL THEN 'REFUND_'||r.state "
+    + "WHEN e.order_id IS NOT NULL AND o.status='PENDING' THEN 'EXPIRED' "
+    + "ELSE o.status END AS display_status "
+    + 'FROM orders o LEFT JOIN order_expirations e ON e.order_id=o.id '
+    + 'LEFT JOIN star_refunds r ON r.order_id=o.id ';
   const stmt = admin
-    ? env.DB.prepare('SELECT id,user_id,kind,status,total_vnd,total_stars FROM orders ORDER BY created_at DESC LIMIT 10')
-    : env.DB.prepare('SELECT id,user_id,kind,status,total_vnd,total_stars FROM orders WHERE user_id=? ORDER BY created_at DESC LIMIT 10').bind(String(userId));
+    ? env.DB.prepare(projection+'ORDER BY o.created_at DESC LIMIT 10')
+    : env.DB.prepare(projection+'WHERE o.user_id=? ORDER BY o.created_at DESC LIMIT 10').bind(String(userId));
   const rows = await stmt.all();
   return send(env, chatId, rows.results.length
-    ? rows.results.map(o => o.id + ' · ' + o.status + ' · ' + (o.kind === 'digital' ? o.total_stars + '⭐' : o.total_vnd + 'đ') + (admin ? ' · ' + o.user_id : '')).join('\n')
+    ? rows.results.map(o => o.id + ' · ' + o.display_status + ' · ' + (o.kind === 'digital' ? o.total_stars + '⭐' : o.total_vnd + 'đ') + (admin ? ' · ' + o.user_id : '')).join('\n')
     : 'Chưa có đơn hàng.');
 }
 
@@ -67,14 +75,24 @@ async function finishStars(env, message) {
     // order is never fulfilled unless inventory is attached to that order.
     await env.DB.batch([
       env.DB.prepare(
-        "UPDATE digital_inventory SET delivered_order_id=?,reserved_order_id=NULL WHERE reserved_order_id=? AND delivered_order_id IS NULL AND EXISTS(SELECT 1 FROM orders WHERE id=? AND status='PAID')"
-      ).bind(id,id,id),
+        "UPDATE digital_inventory SET delivered_order_id=?,reserved_order_id=NULL WHERE reserved_order_id=? AND delivered_order_id IS NULL "
+        + "AND EXISTS(SELECT 1 FROM orders WHERE id=? AND status='PAID') "
+        + 'AND NOT EXISTS(SELECT 1 FROM order_expirations WHERE order_id=?) '
+        + 'AND NOT EXISTS(SELECT 1 FROM star_refunds WHERE order_id=?)'
+      ).bind(id,id,id,id,id),
       env.DB.prepare(
-        "UPDATE orders SET status='FULFILLED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PAID' AND EXISTS(SELECT 1 FROM digital_inventory WHERE delivered_order_id=?)"
-      ).bind(id,id)
+        "UPDATE orders SET status='FULFILLED',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PAID' "
+        + 'AND EXISTS(SELECT 1 FROM digital_inventory WHERE delivered_order_id=?) '
+        + 'AND NOT EXISTS(SELECT 1 FROM order_expirations WHERE order_id=?) '
+        + 'AND NOT EXISTS(SELECT 1 FROM star_refunds WHERE order_id=?)'
+      ).bind(id,id,id,id)
     ]);
     current = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(id).first();
   }
+  // A refund operation is a permanent settlement barrier. Telegram charge
+  // replays must not re-allocate inventory after a refund has started.
+  const refund = await env.DB.prepare('SELECT state FROM star_refunds WHERE order_id=?').bind(id).first();
+  if (refund) return;
   if (current.status === 'FULFILLED') {
     await enqueueNotification(env,id,'stars_key',current.user_id);
   } else if (current.status === 'PAID') {
@@ -107,8 +125,36 @@ async function adminCommand(env, chatId, text) {
     await env.DB.prepare('INSERT INTO digital_inventory(product_id,secret_value) VALUES(?,?)').bind(p.id,match[2].trim()).run();
     return send(env, chatId, 'Đã bổ sung 1 key cho sản phẩm #' + p.id);
   }
-  if (text === '/admin') return send(env, chatId, 'Quản trị:\n/addphysical Tên | VND | Mô tả\n/adddigital Tên | Stars | Mô tả\n/addkey ID | Key\n/adminorders\n/fulfill MÃ_ĐƠN');
+  if (text === '/admin') return send(env, chatId, 'Quản trị:\n/addphysical Tên | VND | Mô tả\n/adddigital Tên | Stars | Mô tả\n/addkey ID | Key\n/adminorders\n/expireorders\n/bankreviews\n/ackbank MÃ_GIAO_DỊCH\n/refundstars MÃ_ĐƠN\n/refundreviews\n/retryalerts\n/fulfill MÃ_ĐƠN');
   if (text === '/adminorders') return listOrders(env, chatId, null, true);
+  if (text === '/expireorders') {
+    const result = await expirePendingOrders(env,{limit:50});
+    return send(env,chatId,'Đã hết hạn '+result.expired+' đơn, giải phóng '+result.releasedKeys+' key. Đơn đã duyệt pre-checkout được giữ lại.');
+  }
+  if (text === '/bankreviews') {
+    const rows = await listBankReviews(env);
+    return send(env,chatId,rows.length
+      ? 'Giao dịch cần đối soát (không tự cộng tiền):\n'
+        + rows.map(x=>x.event_id+' · '+x.order_id+' · '+x.amount_vnd+'đ · '+x.reason).join('\n')
+      : 'Không có giao dịch ngân hàng chờ đối soát.');
+  }
+  if (text.startsWith('/ackbank ')) {
+    const id=text.slice('/ackbank '.length).trim();
+    const ok=await acknowledgeBankReview(env,id);
+    return send(env,chatId,ok
+      ? 'Đã đánh dấu đối soát '+id+'. Chỉ là ghi nhận thủ công; không hoàn tiền hay cộng số dư.'
+      : 'Không tìm thấy giao dịch chờ đối soát.');
+  }
+  if (text === '/refundreviews') {
+    const rows=await listRefundReviews(env);
+    return send(env,chatId,rows.length
+      ? 'Hoàn Stars cần xác minh với Telegram:\n'+rows.map(x=>x.order_id+' · '+x.state).join('\n')
+      : 'Không có hoàn Stars đang chờ xác minh.');
+  }
+  if (text.startsWith('/refundstars ')) {
+    const result=await refundPaidStars(env,text.slice('/refundstars '.length),telegram);
+    return send(env,chatId,'Hoàn Stars: '+result.status+'\n'+result.detail);
+  }
   if (text === '/retryalerts') {
     try {
       const count = await flushNotifications(env,send,{limit:20});
@@ -180,39 +226,65 @@ async function telegramUpdate(env, update) {
 }
 
 async function sepayWebhook(env, body) {
-  const tx = sepayPayment(body, env.BANK_ACCOUNT_NO);
-  if (!tx) return json({ success: true, matched: false });
-  // Query settled orders too: callbacks can be replayed after payment was
-  // persisted but notification delivery failed.
+  const tx = sepayPayment(body,env.BANK_ACCOUNT_NO);
+  if (!tx) return json({ success:true, matched:false });
   const order = await env.DB.prepare(
-    "SELECT * FROM orders WHERE id=? AND kind='physical' AND provider='sepay' AND total_vnd=?"
-  ).bind(tx.orderId,tx.amount).first();
-  if (!order) return json({ success: true, matched: false });
+    "SELECT * FROM orders WHERE id=? AND kind='physical' AND provider='sepay'"
+  ).bind(tx.orderId).first();
+  if (!order) {
+    await recordBankReview(env,tx,'UNKNOWN_ORDER');
+    return json({success:true,matched:false,review:true});
+  }
+  if (order.total_vnd !== tx.amount) {
+    await recordBankReview(env,tx,'AMOUNT_MISMATCH');
+    return json({success:true,matched:false,review:true});
+  }
+  const expiration = await env.DB.prepare('SELECT 1 FROM order_expirations WHERE order_id=?')
+    .bind(tx.orderId).first();
+  if (expiration) {
+    await recordBankReview(env,tx,'EXPIRED_ORDER');
+    return json({success:true,matched:false,review:true});
+  }
+  if (order.status !== 'PENDING' && order.payment_ref !== tx.eventId) {
+    await recordBankReview(env,tx,'ALREADY_PAID');
+    return json({success:true,matched:false,review:true});
+  }
   let newlyPaid = false;
   if (order.status === 'PENDING') {
     const results = await env.DB.batch([
       env.DB.prepare(
-        "INSERT OR IGNORE INTO payment_events(provider,event_id,order_id) SELECT 'sepay',?,? WHERE EXISTS(SELECT 1 FROM orders WHERE id=? AND status='PENDING' AND total_vnd=?)"
-      ).bind(tx.eventId,tx.orderId,tx.orderId,tx.amount),
+        "INSERT OR IGNORE INTO payment_events(provider,event_id,order_id) "
+        + "SELECT 'sepay',?,? WHERE EXISTS(SELECT 1 FROM orders "
+        + "WHERE id=? AND status='PENDING' AND total_vnd=?) "
+        + 'AND NOT EXISTS(SELECT 1 FROM order_expirations WHERE order_id=?)'
+      ).bind(tx.eventId,tx.orderId,tx.orderId,tx.amount,tx.orderId),
       env.DB.prepare(
-        "UPDATE orders SET status='PAID',payment_ref=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='PENDING' AND provider='sepay' AND total_vnd=? AND EXISTS (SELECT 1 FROM payment_events WHERE provider='sepay' AND event_id=? AND order_id=?)"
-      ).bind(tx.eventId,tx.orderId,tx.amount,tx.eventId,tx.orderId)
+        "UPDATE orders SET status='PAID',payment_ref=?,updated_at=CURRENT_TIMESTAMP "
+        + "WHERE id=? AND status='PENDING' AND provider='sepay' AND total_vnd=? "
+        + 'AND NOT EXISTS(SELECT 1 FROM order_expirations WHERE order_id=?) '
+        + "AND EXISTS(SELECT 1 FROM payment_events WHERE provider='sepay' AND event_id=? AND order_id=?)"
+      ).bind(tx.eventId,tx.orderId,tx.amount,tx.orderId,tx.eventId,tx.orderId)
     ]);
     newlyPaid = !!results[1].meta.changes;
   }
   const current = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(tx.orderId).first();
-  if (!['PAID','FULFILLED'].includes(current?.status) || current.payment_ref !== tx.eventId)
-    return json({ success:true, matched:false });
+  if (!['PAID','FULFILLED'].includes(current?.status) || current.payment_ref !== tx.eventId) {
+    const expiredNow = await env.DB.prepare('SELECT 1 FROM order_expirations WHERE order_id=?').bind(tx.orderId).first();
+    await recordBankReview(env,tx,expiredNow?'EXPIRED_ORDER':'ALREADY_PAID');
+    return json({ success:true,matched:false,review:true });
+  }
   await enqueueNotification(env,tx.orderId,'physical_paid_customer',current.user_id);
   if (adminId(env)) await enqueueNotification(env,tx.orderId,'physical_paid_admin',adminId(env));
   await flushNotifications(env,send,{orderId:tx.orderId});
-  return json({ success: true, matched: newlyPaid });
+  return json({ success:true,matched:newlyPaid });
 }
-
 export default {
   async scheduled(_controller,env,ctx) {
-    ctx.waitUntil(flushNotifications(env,send,{limit:40}).catch(error => {
-      console.error('Scheduled payment notification retry failed:',error.message);
+    ctx.waitUntil((async () => {
+      await expirePendingOrders(env,{limit:100});
+      await flushNotifications(env,send,{limit:40});
+    })().catch(error => {
+      console.error('Scheduled reconciliation failed:',error.message);
       throw error;
     }));
   },

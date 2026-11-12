@@ -17,3 +17,9 @@ Build a small, secure, source-available Telegram shop for Cloudflare Workers + D
 
 ## Development
 Node.js 24 preferred. Run `npm run check`, `npm test` and validate the Docker build when changing runtimes. Keep Telegram/SePay webhook paths stable across all platforms. Keep changes small, readable, and bilingual-friendly. Document any unimplemented production requirement explicitly.
+
+## Reconciliation invariants
+- Never expire a Stars order whose pre_checkout_query was approved. A successful_payment can be delayed.
+- Never re-issue an uncertain Stars refund operation without checking Telegram first; retain immutable charge IDs.
+- Record late/mismatched SePay transfers for explicit review, never credit them against a different order.
+- D1 and Turso must have identical forward-only migrations. Add negative/replay/race tests for payment changes.
