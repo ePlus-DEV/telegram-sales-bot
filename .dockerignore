@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+.wrangler
+.dev.vars
+.env
+.env.*
+*.sqlite
+*.db
+coverage
+tests
+docs

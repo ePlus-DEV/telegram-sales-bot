@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: telegram-sales-bot
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: SEPAY_WEBHOOK_API_KEY
+        sync: false
+      - key: ADMIN_TELEGRAM_ID
+        sync: false
+      - key: BANK_BIN
+        sync: false
+      - key: BANK_ACCOUNT_NO
+        sync: false
+      - key: BANK_ACCOUNT_NAME
+        sync: false
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: SUPPORT_USERNAME
+        sync: false
