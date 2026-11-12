@@ -264,3 +264,31 @@ test('callback acknowledgement outage does not lose purchases; group callbacks r
   assert.equal((await worker.fetch(telegramRequest(direct),env,ctx)).status,200);
   assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM orders').get().n,1);
 });
+
+test('legacy Stars invoices from before migration 0003 remain payable exactly once',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Old key','digital',10)").run();
+  const id='EABCDEF654321';
+  DB.raw.prepare(
+    "INSERT INTO orders(id,user_id,product_id,kind,provider,total_stars) VALUES(?,? ,1,'digital','stars',10)"
+  ).run(id,'81');
+  DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value,reserved_order_id) VALUES(1,'OLD-KEY',?)").run(id);
+  const q={id:'legacy-pc1',from:{id:81},currency:'XTR',invoice_payload:id,total_amount:10};
+  await worker.fetch(telegramRequest({update_id:430,pre_checkout_query:q}),env,ctx);
+  assert.equal(calls.filter(c=>c.method==='answerPreCheckoutQuery').at(-1).data.ok,true);
+  assert.equal(DB.raw.prepare('SELECT callback_id FROM purchase_intents WHERE order_id=?').get(id).callback_id,'legacy:'+id);
+  await worker.fetch(telegramRequest({update_id:431,pre_checkout_query:{...q,id:'legacy-pc2'}}),env,ctx);
+  assert.equal(calls.filter(c=>c.method==='answerPreCheckoutQuery').at(-1).data.ok,false);
+});
+test('a paid physical order never re-displays the bank QR on callback replay',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_vnd) VALUES('Book','physical',10000)").run();
+  const cb={update_id:432,callback_query:{id:'once-paid',from:{id:86},data:'buy:1',message:{chat:{id:86,type:'private'}}}};
+  await worker.fetch(telegramRequest(cb),env,ctx);
+  const id=DB.raw.prepare('SELECT id FROM orders').get().id;
+  DB.raw.prepare("UPDATE orders SET status='PAID',payment_ref='refund-check' WHERE id=?").run(id);
+  await worker.fetch(telegramRequest({...cb,update_id:433}),env,ctx);
+  const last=calls.filter(c=>c.method==='sendMessage').at(-1).data.text;
+  assert.match(last,/Không chuyển khoản lại/);
+  assert.ok(!last.includes('QR:'));
+});

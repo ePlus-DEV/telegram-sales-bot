@@ -144,6 +144,15 @@ export async function recoverInvoice(env,chatId,userId,orderId,telegram,send) {
 export async function approvePrecheckout(env,query) {
   const order = await env.DB.prepare('SELECT * FROM orders WHERE id=?').bind(query.invoice_payload).first();
   if (query.currency !== 'XTR' || !orderPaymentMatches(order,query.from.id,query.total_amount,'stars')) return false;
+  // Backfill legacy PENDING Stars orders created by sendInvoice before migration
+  // 0003. These invoices can still be in a customer's chat at deploy time.
+  // The unique order_id prevents multiple backfills when requests race.
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO purchase_intents(callback_id,order_id,user_id,chat_id,product_id) '
+    + 'SELECT ?,id,user_id,user_id,product_id FROM orders '
+    + "WHERE id=? AND provider='stars' AND kind='digital' AND status='PENDING' "
+    + 'AND NOT EXISTS(SELECT 1 FROM purchase_intents WHERE order_id=?)'
+  ).bind('legacy:'+order.id,order.id,order.id).run();
   // Atomic one-authorization-per-order guard, including across two concurrent
   // invoice links. Replays of the *same* pre_checkout_query id are allowed.
   const updated = await env.DB.prepare(

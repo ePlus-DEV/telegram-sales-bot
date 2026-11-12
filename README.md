@@ -46,7 +46,7 @@ Important: Telegram \`sendMessage\` has no idempotency key. A worker that crashe
 
 Apply migration `0003_purchase_intents.sql` before deploying this version: run `npm run db:migrate` for D1 or `npm run db:migrate:turso` for Turso. The `purchase_intents` table records one **callback_query.id → order** mapping in the same atomic database batch as the order and key reservation.
 
-Digital products use `createInvoiceLink` and persist the Telegram Stars invoice link. If the first message is lost, the buyer can use `/invoice ORDER_ID` to retrieve their own invoice (other buyers cannot). Repeated callbacks do not create extra orders or reserve extra keys. Only the first unique Stars `pre_checkout_query.id` can be approved for an order; retries of that **same query** are accepted until settlement.
+Digital products use `createInvoiceLink` and persist the Telegram Stars invoice link. If the first message is lost, the buyer can use `/invoice ORDER_ID` to retrieve their own invoice (other buyers cannot). Repeated callbacks do not create extra orders or reserve extra keys. Pre-migration Stars orders without a purchase-intent record are automatically backfilled when Telegram sends their first pre-checkout query. Only the first unique Stars `pre_checkout_query.id` can be approved for an order; retries of that **same query** are accepted until settlement.
 
 **Remaining limitation:** a first approved checkout that never completes remains locked to that query; issue #5 will add expiration and reconciliation. Users can place a separate new order with a new Buy callback; already-approved orders must be reconciled before inventory is released.
 
