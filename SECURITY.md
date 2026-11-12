@@ -8,7 +8,7 @@ For a vulnerability, do **not** post tokens, customer keys, bank transactions, o
 - Use unique random Telegram and SePay webhook secrets stored as Worker secrets, never in the repository.
 - Keep D1 or Turso admin access and backups tightly restricted; never store payment data on an ephemeral host filesystem.
 - Validate real SePay webhook delivery with the precise bank account and transaction.
-- Test Stars invoice, successful payment, refund, inventory and duplicate-event behavior.
+- Test Stars invoice-link recovery, single pre-checkout approval, successful payment, refund, inventory and duplicate-event behavior.
 - The payment notification outbox supports retry; monitor stuck outbox entries and use `/retryalerts` or Cloudflare cron. The transport is at-least-once (Telegram does not provide an idempotency key for sendMessage).
 - Add alerting and recovery for late settlement, expired reservations, actual refunds, and paid-but-missing stock before production.
 - Review current Telegram rules for digital vs physical payments.

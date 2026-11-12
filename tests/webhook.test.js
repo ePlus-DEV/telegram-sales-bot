@@ -6,6 +6,7 @@ import worker from '../src/index.js';
 
 const schema = readFileSync(new URL('../migrations/0001_initial.sql', import.meta.url),'utf8');
 const schemaV2 = readFileSync(new URL('../migrations/0002_notification_outbox.sql', import.meta.url),'utf8');
+const schemaV3 = readFileSync(new URL('../migrations/0003_purchase_intents.sql', import.meta.url),'utf8');
 const envDefaults = {
   BOT_TOKEN:'fake_test_bot_token', TELEGRAM_WEBHOOK_SECRET:'known-secret',
   SEPAY_WEBHOOK_API_KEY:'sepay-secret', ADMIN_TELEGRAM_ID:'42',
@@ -16,6 +17,8 @@ function d1TestDb() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(schema);
   sqlite.exec(schemaV2);
+  sqlite.exec(schemaV3);
+  let batchQueue = Promise.resolve();
   return {
     raw:sqlite,
     prepare(sql) {
@@ -30,15 +33,21 @@ function d1TestDb() {
       });
       return { bind:binding, first:async () => binding().first(), all:async () => binding().all(), run:async () => binding().run() };
     },
-    async batch(statements) {
-      // The Worker uses D1's atomic batch. The mock statements are already bound objects.
-      sqlite.exec('BEGIN');
-      try {
-        const out = [];
-        for (const statement of statements) out.push(await statement.run());
-        sqlite.exec('COMMIT');
-        return out;
-      } catch (err) { sqlite.exec('ROLLBACK'); throw err; }
+    batch(statements) {
+      // Single local SQLite connection: serialize writes as a D1/libSQL
+      // transactional service would, rather than nesting BEGIN across awaits.
+      const runBatch = async () => {
+        sqlite.exec('BEGIN');
+        try {
+          const out = [];
+          for (const statement of statements) out.push(await statement.run());
+          sqlite.exec('COMMIT');
+          return out;
+        } catch (err) { sqlite.exec('ROLLBACK'); throw err; }
+      };
+      const transaction = batchQueue.then(runBatch,runBatch);
+      batchQueue = transaction.catch(() => {});
+      return transaction;
     }
   };
 }
@@ -55,7 +64,7 @@ function mockTelegram(t) {
   const original=globalThis.fetch;
   globalThis.fetch=async (url,options) => {
     calls.push({ url:String(url), method:String(url).split('/').pop(), data:JSON.parse(options.body) });
-    return Response.json({ ok:true,result:true });
+    return Response.json({ ok:true,result:String(url).endsWith('/createInvoiceLink') ? 'https://t.me/$TEST-INVOICE' : true });
   };
   t.after(()=> { globalThis.fetch=original; });
   return calls;
@@ -95,9 +104,10 @@ test('Stars checkout uses XTR, reserves key, fulfills once and protects /mykey',
   DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value) VALUES(1,'PRIVATE-LICENSE-001')").run();
   const buy={update_id:2,callback_query:{id:'cb2',from:{id:77},data:'buy:1',message:{chat:{id:77}}}};
   assert.equal((await worker.fetch(telegramRequest(buy),env,ctx)).status,200);
-  const invoice=calls.find(c=>c.method==='sendInvoice');
+  const invoice=calls.find(c=>c.method==='createInvoiceLink');
   assert.equal(invoice.data.currency,'XTR');
   assert.equal(invoice.data.prices[0].amount,25);
+  assert.ok(calls.some(c=>c.method==='sendMessage' && c.data.reply_markup?.inline_keyboard?.[0]?.[0]?.url==='https://t.me/$TEST-INVOICE'));
   const order=DB.raw.prepare('SELECT * FROM orders').get();
   assert.equal(DB.raw.prepare('SELECT reserved_order_id FROM digital_inventory').get().reserved_order_id,order.id);
   await worker.fetch(telegramRequest({update_id:3,pre_checkout_query:{id:'check',from:{id:77},currency:'XTR',invoice_payload:order.id,total_amount:25}}),env,ctx);
@@ -188,4 +198,97 @@ test('recovery command is admin-only; scheduled retry flushes leased notificatio
   await ctx.done();
   assert.equal(DB.raw.prepare('SELECT state FROM notification_outbox').get().state,'SENT');
   assert.ok(calls.some(c=>c.method==='sendMessage' && c.data.text.includes('Đã nhận')));
+});
+
+test('replayed and concurrent callback creates only one physical order',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_vnd) VALUES('Mug','physical',50000)").run();
+  const cb={update_id:400,callback_query:{id:'same-callback',from:{id:99},data:'buy:1',message:{chat:{id:99,type:'private'}}}};
+  const responses=await Promise.all([worker.fetch(telegramRequest(cb),env,ctx),worker.fetch(telegramRequest({...cb,update_id:401}),env,ctx)]);
+  assert.deepEqual(responses.map(r=>r.status),[200,200]);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM orders').get().n,1);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM purchase_intents').get().n,1);
+  const order=DB.raw.prepare('SELECT id FROM orders').get();
+  assert.equal(calls.filter(c=>c.method==='sendMessage' && c.data.text.includes('Đơn '+order.id)).length,2);
+});
+
+test('replayed Stars Buy callback reuses invoice and precheckout permits one unique query',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('License','digital',42)").run();
+  DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value) VALUES(1,'SECRET')").run();
+  const buy={update_id:402,callback_query:{id:'same-stars',from:{id:71},data:'buy:1',message:{chat:{id:71,type:'private'}}}};
+  await Promise.all([worker.fetch(telegramRequest(buy),env,ctx),worker.fetch(telegramRequest({...buy,update_id:403}),env,ctx)]);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM orders').get().n,1);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM digital_inventory WHERE reserved_order_id IS NOT NULL').get().n,1);
+  const id=DB.raw.prepare('SELECT id FROM orders').get().id;
+  const q={id:'pc1',from:{id:71},currency:'XTR',invoice_payload:id,total_amount:42};
+  await worker.fetch(telegramRequest({update_id:404,pre_checkout_query:q}),env,ctx);
+  assert.equal(calls.filter(c=>c.method==='answerPreCheckoutQuery').at(-1).data.ok,true);
+  await worker.fetch(telegramRequest({update_id:405,pre_checkout_query:q}),env,ctx);
+  assert.equal(calls.filter(c=>c.method==='answerPreCheckoutQuery').at(-1).data.ok,true);
+  await worker.fetch(telegramRequest({update_id:406,pre_checkout_query:{...q,id:'pc2'}}),env,ctx);
+  assert.equal(calls.filter(c=>c.method==='answerPreCheckoutQuery').at(-1).data.ok,false);
+  await worker.fetch(telegramRequest({update_id:407,message:{chat:{id:71,type:'private'},from:{id:71},text:'/invoice '+id}}),env,ctx);
+  assert.equal(calls.filter(c=>c.method==='createInvoiceLink').length,1);
+  await worker.fetch(telegramRequest({update_id:408,message:{chat:{id:88,type:'private'},from:{id:88},text:'/invoice '+id}}),env,ctx);
+  assert.equal(calls.at(-1).data.text,'Không tìm thấy hóa đơn của bạn.');
+});
+
+test('failed Telegram invoice creation is recoverable without a second order or key',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('License','digital',10)").run();
+  DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value) VALUES(1,'SECRET')").run();
+  const cb={update_id:410,callback_query:{id:'retry-me',from:{id:55},data:'buy:1',message:{chat:{id:55,type:'private'}}}};
+  const original=globalThis.fetch;let fail=0;
+  globalThis.fetch=(url,opts)=>(String(url).endsWith('/createInvoiceLink') && fail++===0)
+    ? Response.json({ok:false,description:'test failed'},{status:503}) : original(url,opts);
+  assert.equal((await worker.fetch(telegramRequest(cb),env,ctx)).status,500);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM orders').get().n,1);
+  assert.equal((await worker.fetch(telegramRequest({...cb,update_id:411}),env,ctx)).status,200);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM orders').get().n,1);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM digital_inventory WHERE reserved_order_id IS NOT NULL').get().n,1);
+  assert.ok(DB.raw.prepare('SELECT invoice_url FROM purchase_intents').get().invoice_url);
+  assert.equal(calls.filter(c=>c.method==='createInvoiceLink').length,1);
+});
+
+test('callback acknowledgement outage does not lose purchases; group callbacks rejected',async t=>{
+  mockTelegram(t);const DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_vnd) VALUES('Book','physical',20000)").run();
+  const original=globalThis.fetch;
+  globalThis.fetch=(url,opts)=>String(url).endsWith('/answerCallbackQuery')
+    ? Response.json({ok:false},{status:502}) : original(url,opts);
+  const group={update_id:412,callback_query:{id:'group',from:{id:22},data:'buy:1',message:{chat:{id:-1000,type:'supergroup'}}}};
+  assert.equal((await worker.fetch(telegramRequest(group),env,ctx)).status,200);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM orders').get().n,0);
+  const direct={update_id:413,callback_query:{id:'direct',from:{id:22},data:'buy:1',message:{chat:{id:22,type:'private'}}}};
+  assert.equal((await worker.fetch(telegramRequest(direct),env,ctx)).status,200);
+  assert.equal(DB.raw.prepare('SELECT count(*) AS n FROM orders').get().n,1);
+});
+
+test('legacy Stars invoices from before migration 0003 remain payable exactly once',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_stars) VALUES('Old key','digital',10)").run();
+  const id='EABCDEF654321';
+  DB.raw.prepare(
+    "INSERT INTO orders(id,user_id,product_id,kind,provider,total_stars) VALUES(?,? ,1,'digital','stars',10)"
+  ).run(id,'81');
+  DB.raw.prepare("INSERT INTO digital_inventory(product_id,secret_value,reserved_order_id) VALUES(1,'OLD-KEY',?)").run(id);
+  const q={id:'legacy-pc1',from:{id:81},currency:'XTR',invoice_payload:id,total_amount:10};
+  await worker.fetch(telegramRequest({update_id:430,pre_checkout_query:q}),env,ctx);
+  assert.equal(calls.filter(c=>c.method==='answerPreCheckoutQuery').at(-1).data.ok,true);
+  assert.equal(DB.raw.prepare('SELECT callback_id FROM purchase_intents WHERE order_id=?').get(id).callback_id,'legacy:'+id);
+  await worker.fetch(telegramRequest({update_id:431,pre_checkout_query:{...q,id:'legacy-pc2'}}),env,ctx);
+  assert.equal(calls.filter(c=>c.method==='answerPreCheckoutQuery').at(-1).data.ok,false);
+});
+test('a paid physical order never re-displays the bank QR on callback replay',async t=>{
+  const calls=mockTelegram(t),DB=d1TestDb(),env={...envDefaults,DB},ctx=context();
+  DB.raw.prepare("INSERT INTO products(name,kind,price_vnd) VALUES('Book','physical',10000)").run();
+  const cb={update_id:432,callback_query:{id:'once-paid',from:{id:86},data:'buy:1',message:{chat:{id:86,type:'private'}}}};
+  await worker.fetch(telegramRequest(cb),env,ctx);
+  const id=DB.raw.prepare('SELECT id FROM orders').get().id;
+  DB.raw.prepare("UPDATE orders SET status='PAID',payment_ref='refund-check' WHERE id=?").run(id);
+  await worker.fetch(telegramRequest({...cb,update_id:433}),env,ctx);
+  const last=calls.filter(c=>c.method==='sendMessage').at(-1).data.text;
+  assert.match(last,/Không chuyển khoản lại/);
+  assert.ok(!last.includes('QR:'));
 });
