@@ -1,18 +1,30 @@
 {
   "name": "@eplus-dev/telegram-sales-bot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Serverless Telegram storefront with Telegram Stars and SePay/VietQR",
-  "engines": { "node": ">=22" },
+  "description": "Portable Telegram shop: Cloudflare Workers, Vercel, Railway, Render, Docker",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/index.js && node --check src/domain.js && node --check scripts/register-webhook.mjs",
+    "check": "node --check src/index.js && node --check src/domain.js && node --check src/runtime.js && node --check src/server.js && node --check src/adapters/turso.js && node --check scripts/register-webhook.mjs && node --check scripts/migrate-turso.mjs && node --check api/healthz.js && node --check api/telegram-webhook.js && node --check api/sepay-webhook.js",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "start": "node src/server.js",
+    "start:server": "node src/server.js",
     "db:migrate": "wrangler d1 migrations apply DB --remote",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:turso": "node scripts/migrate-turso.mjs",
     "webhook:register": "node scripts/register-webhook.mjs"
   },
-  "devDependencies": { "wrangler": "^4.0.0" }
+  "dependencies": {
+    "@libsql/client": "^0.18.0",
+    "@vercel/functions": "^3.11.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0",
+    "railway": "^3.16.0"
+  }
 }

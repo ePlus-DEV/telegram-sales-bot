@@ -6,7 +6,7 @@ For a vulnerability, do **not** post tokens, customer keys, bank transactions, o
 
 ## Production checklist
 - Use unique random Telegram and SePay webhook secrets stored as Worker secrets, never in the repository.
-- Keep D1 admin access and backups tightly restricted.
+- Keep D1 or Turso admin access and backups tightly restricted; never store payment data on an ephemeral host filesystem.
 - Validate real SePay webhook delivery with the precise bank account and transaction.
 - Test Stars invoice, successful payment, refund, inventory and duplicate-event behavior.
 - Add alerting and recovery for a successful payment whose notification/delivery fails.
