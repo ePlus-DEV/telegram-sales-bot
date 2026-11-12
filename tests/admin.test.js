@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import worker from '../src/index.js';
 import {handleRequest} from '../src/runtime.js';
+import {createServer} from '../src/server.js';
 
 function testDb() {
   const sqlite=new DatabaseSync(':memory:');
@@ -185,4 +186,27 @@ test('shared Fetch runtime can serve admin using an injected D1 binding',async()
   });
   assert.equal(response.status,200);
   assert.match(await response.text(),/Đăng nhập quản trị/);
+});
+
+test('Node HTTP adapter respects Host and proxy HTTPS origin for admin forms',async t=>{
+  const db=testDb(),server=createServer(env(db));
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>server.close());
+  const port=server.address().port;
+  const origin='http://127.0.0.1:'+port;
+  const response=await fetch(origin+'/admin/login',{
+    method:'POST',
+    headers:{origin,'content-type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({password}).toString(),
+    redirect:'manual'
+  });
+  assert.equal(response.status,303);
+  assert.match(response.headers.get('set-cookie'),/HttpOnly/);
+  const bad=await fetch(origin+'/admin/login',{
+    method:'POST',
+    headers:{origin:'https://attacker.example','content-type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({password}).toString(),
+    redirect:'manual'
+  });
+  assert.equal(bad.status,403);
 });
