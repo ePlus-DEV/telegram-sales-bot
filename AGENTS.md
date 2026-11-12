@@ -35,3 +35,9 @@ Node.js 24 preferred. Run `npm run check`, `npm test` and validate the Docker bu
 - Web Admin static labels belong in `src/admin/locales.js`. Never translate user-provided product names, credentials, data or key contents.
 - Telegram manual locale selection must persist across Workers and Turso runtimes and override language_code. Unsupported languages fall back to Vietnamese.
 - Add tests for locale switching, auto-detection, fallback, background notifications and English admin login. Do not break legacy Vietnamese flows.
+
+## Documentation maintenance
+- Keep README concise: feature summary, deploy matrix, getting-started links, safety caveats and roadmap link. Detailed migration/gateway/runbook guidance belongs in `docs/`.
+- Treat [ROADMAP.md](ROADMAP.md) as the project-level delivery plan; distinguish implemented code, partial functionality, deployment verification and release gates.
+- Never imply that CI means verified payments or production readiness. Do not claim a host was deployed unless an end-to-end test actually ran.
+- Keep English/Vietnamese getting-started guides consistent and run `npm run docs:check` after changing Markdown links.

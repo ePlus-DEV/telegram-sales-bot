@@ -1,153 +1,146 @@
-# Deployment guide — ePlus Telegram Sales Bot
+# Deployment — Cloudflare, Vercel, Railway, Render, Koyeb, Docker
 
-**Supported targets:** Cloudflare Workers + D1, Vercel + Turso, Railway + Turso, Render + Turso, Koyeb + Turso, Docker/VPS + Turso.
+[← Docs](README.md) · [Getting started](GETTING_STARTED.md) · [Configuration](CONFIGURATION.md) · [Operations](OPERATIONS.md)
 
-## 0. Understand the storage and payment model
+> **All platforms share one application.** Cloudflare Workers use native D1; Vercel/Railway/Render/Koyeb/Docker use durable **Turso/libSQL**. Platform configuration exists in the repo, but no live end-to-end deployment/payment validation has been confirmed.
 
-- Cloudflare Workers: native `DB` D1 binding; schema migration via Wrangler.
-- Every other provider: remote **Turso/libSQL** using `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. Do **not** use ephemeral `*.db` on Vercel/Render/Netlify or a container without a persistent volume. No D1 account required when using Turso.
-- Digital products sold inside Telegram: Telegram Stars only (`XTR`).
-- Physical products: VietQR bank transfer + authenticated SePay webhook; fulfilment is manual after confirming shipment.
-- All providers expose `GET /healthz`, `POST /telegram/webhook`, `POST /sepay/webhook`.
-- Do not enable more than one deployed environment with the **same Telegram token**: each call to `setWebhook` replaces the previously registered URL.
-- Do not expose your secrets to public Git repositories, frontend bundles, or preview deployments. Configure them in service environment settings.
+## Comparison
 
-## 1. Environment variables
-
-| Key | Cloudflare | Other providers | Description |
+| Host | Runtime | Persistent DB | Main caution |
 | --- | --- | --- | --- |
-| `BOT_TOKEN` | secret | secret | Token from @BotFather |
-| `TELEGRAM_WEBHOOK_SECRET` | secret | secret | Random A-Z / a-z / 0-9 / _ / -, max 256 |
-| `SEPAY_WEBHOOK_API_KEY` | secret | secret | Enable SePay API Key webhook authentication |
-| `ADMIN_TELEGRAM_ID` | variable | variable | Numeric admin ID |
-| `BANK_BIN` | variable | variable | Recipient bank BIN |
-| `BANK_ACCOUNT_NO` | variable | variable | Recipient account (must match SePay payload) |
-| `BANK_ACCOUNT_NAME` | variable | variable | Bank account name |
-| `SUPPORT_USERNAME` | optional | optional | Telegram username for support |
-| `TURSO_DATABASE_URL` | not needed | secret | `libsql://...turso.io` |
-| `TURSO_AUTH_TOKEN` | not needed | secret | Database authentication token |
-| `PORT` | not needed | optional | Node HTTP port (default 3000) |
-| `PUBLIC_BASE_URL` | only when registering | only when registering | External HTTPS URL for `webhook:register`, **not** a runtime secret |
+| Cloudflare Workers | Worker Fetch handlers | D1 | Worker/D1 free-plan quotas and scheduled Cron behavior |
+| Vercel | Functions + rewrites | Turso | No persistent function filesystem; execution-time limits |
+| Railway | Docker/Node HTTP | Turso | Usage credit/cost and uptime need checking |
+| Render | Docker/Node HTTP | Turso | Free service can sleep, affecting webhook timing |
+| Koyeb | Docker/Node HTTP | Turso | Validate current free-tier limits, sleep and port settings |
+| Docker/VPS/EasyPanel | Node HTTP in container | Turso | Owner must handle HTTPS, availability and system updates |
 
-SePay is only suitable for physical orders here. When your bank/Webhook settings are not ready, omit physical goods from the catalog. Never commit real keys or customer information.
+Do not assume free plans guarantee 24/7 delivery. Telegram requires the bot to answer Stars pre-checkout queries quickly (official API: **10 seconds**).
 
-## 2. Prepare Turso (Vercel / Railway / Render / Koyeb / Docker)
+## Common preparation
 
-1. Create a Turso database (see https://docs.turso.tech/).
-2. Generate a database auth token and retrieve its remote `libsql://` URL.
-3. From a local clone of the repository:
+From a local checkout:
 
 ```bash
+git clone https://github.com/ePlus-DEV/telegram-sales-bot.git
+cd telegram-sales-bot
 npm install
-export TURSO_DATABASE_URL='libsql://your-database.turso.io'
-export TURSO_AUTH_TOKEN='replace-with-secret'
+npm run check
+npm test
+npm run docs:check
+```
+
+Create a separate **staging bot token/database**. Read [configuration](CONFIGURATION.md). Set `BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ADMIN_TELEGRAM_ID`, and `ADMIN_DASHBOARD_PASSWORD` in hosting secret/environment settings. If enabling eligible physical orders, set bank details and `SEPAY_WEBHOOK_API_KEY`.
+
+## Cloudflare Workers + D1
+
+1. Run `npx wrangler login`.
+2. Create a database: `npx wrangler d1 create eplus-telegram-sales-bot`.
+3. Replace `REPLACE_WITH_YOUR_D1_DATABASE_ID` in `../wrangler.toml` with the new UUID. The Worker binding **must** be named `DB`.
+4. Apply **all** migrations `0001–0006` to the remote D1 database:
+
+   ```bash
+   npm run db:migrate
+   ```
+
+5. Deploy: `npm run deploy`.
+6. Store credentials via `npx wrangler secret put BOT_TOKEN`, `npx wrangler secret put TELEGRAM_WEBHOOK_SECRET`, `npx wrangler secret put ADMIN_DASHBOARD_PASSWORD`; add other required settings through Cloudflare secrets/variables. Do not commit real secrets.
+7. Check `https://YOUR_WORKER.workers.dev/healthz`, then [register webhooks](#register-telegram-and-sepay-webhooks).
+
+For local Worker development, copy `../.dev.vars.example` to `.dev.vars`, replace placeholders, run `npm run db:migrate:local` and `npm run dev`. Localhost is not directly reachable by Telegram or SePay.
+
+Cloudflare's `[triggers]` cron currently attempts eligible order expiration and pending notification delivery every **five minutes**. The implementation still requires operational verification on the actual deployed Worker.
+
+## Prepare Turso for non-Cloudflare hosts
+
+Create a database using [Turso documentation](https://docs.turso.tech/) and obtain a remote database URL and authentication token. Export them in your **local terminal**, then apply existing migrations:
+
+```bash
+export TURSO_DATABASE_URL='libsql://YOUR_DATABASE.turso.io'
+export TURSO_AUTH_TOKEN='YOUR_PRIVATE_TOKEN'
 npm run db:migrate:turso
 ```
 
-PowerShell: `$env:TURSO_DATABASE_URL="..."` and `$env:TURSO_AUTH_TOKEN="..."`.
+PowerShell:
 
-Then add the same variables to the hosting provider's **secret/environment settings**. The migration script reads SQL files from `migrations/` and applies them to the **remote** database. No migration automatically runs on a hosting build.
+```powershell
+$env:TURSO_DATABASE_URL = "libsql://YOUR_DATABASE.turso.io"
+$env:TURSO_AUTH_TOKEN = "YOUR_PRIVATE_TOKEN"
+npm run db:migrate:turso
+```
 
-**No automatic data transfer:** switching from D1 to Turso does not copy your orders, keys or history. Export and migrate existing production data carefully before switching.
+**Important:** The Turso migration script executes the SQL files in `migrations/` in order; it does **not** use Wrangler's D1 migration tracking table. Review the migration SQL, back up existing data and test on staging first. A hosting build does not automatically migrate the Turso database. Switching D1 → Turso does not automatically migrate existing orders, keys or sessions.
 
-## 3. Vercel (Functions, no always-on process)
+## Vercel + Turso
 
-1. [Import the GitHub repository on Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot).
-2. Framework preset: **Other**, root: repository root. Node.js runtime (22/24).
-3. Add the environment variables above, including both `TURSO_*`. Use production scope, not public `NEXT_PUBLIC_*`.
-4. Deploy. `vercel.json` maps `/healthz`, `/telegram/webhook` and `/sepay/webhook` to `api/*.js` handlers. Set no static build/output directory.
-5. Open `https://YOUR-VERCEL-DOMAIN/healthz`. A 200 response only checks the HTTP runtime and database configuration; complete a real test purchase before production.
-6. Register Telegram and SePay webhooks as in section 8.
+1. [Import the repository into Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot).
+2. Select framework preset **Other**. Keep project root at the repository root and use a supported Node.js runtime (22+).
+3. Add all required variables (especially `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`) in **Production** environment scope. Keep payment secrets out of public previews.
+4. The checked-in `../vercel.json` rewrites `/healthz`, `/telegram/webhook`, `/sepay/webhook`, and `/admin` paths to `api/` handlers.
+5. Deploy; visit `https://YOUR_APP.vercel.app/healthz`; then [register webhooks](#register-telegram-and-sepay-webhooks).
 
-Vercel Functions cannot use a persistent local SQLite database. This project uses Turso for durability.
+Vercel Functions have no durable local SQLite filesystem; always use Turso. Verify request execution timing and end-to-end payment behavior before onboarding users.
 
-## 4. Railway (Docker/GitHub, long-running service)
+## Railway + Turso
 
-1. [Create Railway project](https://railway.com/new) and connect your GitHub repository.
-2. Railway will detect `Dockerfile`; set the service's public domain and environment variables, including Turso.
-3. Default container command: `node src/server.js`. It binds to `0.0.0.0:$PORT` (default 3000) and responds to `/healthz`.
-4. Optionally use the newer IaC file `.railway/railway.ts` with Railway CLI `railway config plan` and `railway config apply` (after connecting the source). Do **not** add a deprecated `railway.json` / `railway.toml`.
-5. Run migrations against Turso externally, then register the public webhooks.
+1. [Create a Railway service](https://railway.com/new) from this repository.
+2. Use the included `../Dockerfile`; the container starts `node src/server.js` and binds `0.0.0.0:$PORT` (default port 3000).
+3. Set Turso, bot, admin and optional bank variables in Railway's secret/variable editor. Configure a public HTTPS domain.
+4. After preparing Turso, deploy, visit `/healthz` and [register webhooks](#register-telegram-and-sepay-webhooks).
 
-Railway's free trial/credit depends on current plan. Don't assume a permanently free 24/7 service.
+An optional `../.railway/railway.ts` infrastructure-as-code example is included; GitHub deployment with Dockerfile is the simpler path for first-time users. Railway credits, availability and billing depend on the account/plan.
 
-## 5. Render (Blueprint, Docker)
+## Render + Turso
 
-1. [Deploy to Render](https://render.com/deploy?repo=https://github.com/ePlus-DEV/telegram-sales-bot); the `render.yaml` Blueprint defines one Docker web service.
-2. Choose a free web service for testing. Complete the secret/environment variables prompted by Render.
-3. Migrate Turso, deploy, obtain the public `https://*.onrender.com` URL.
-4. Check `/healthz`, then register Telegram/SePay webhooks.
+1. [Import using the Render Blueprint](https://render.com/deploy?repo=https://github.com/ePlus-DEV/telegram-sales-bot) from `../render.yaml`.
+2. Set the prompted credentials in Render's environment/secret settings and ensure the Docker runtime is selected.
+3. Verify that the migration has already been applied to Turso, deploy, then test `/healthz` and [register webhooks](#register-telegram-and-sepay-webhooks).
 
-**Not ideal for payments on the free tier:** Render Free sleeps after ~15 minutes idle, with cold startup that can delay Telegram pre-checkout responses. Render Free filesystem is ephemeral and its free Postgres expires after 30 days. Use Turso for persistence; do not accept live customer payments until cold-start and webhook retries are tested.
+**Caution:** Render Free instances may sleep when idle, making Stars pre-checkout and bank webhook timing unreliable. Do not treat a successful cold-start health check as payment readiness.
 
-## 6. Koyeb (Docker, GitHub)
+## Koyeb + Turso
 
-1. Open https://app.koyeb.com/apps/new, select GitHub repository.
-2. Build method **Dockerfile**. Configure variables (including Turso URL/token) and expose the app on HTTP port `3000` or the platform's `PORT`.
-3. Add a public domain. Verify `/healthz` and register webhooks.
-4. Check the current Koyeb free instance limits and scale-to-zero behavior before using live payments.
+1. Open [Koyeb](https://app.koyeb.com/apps/new) and connect this GitHub repo.
+2. Build using `../Dockerfile`; expose the Node HTTP service on the configured `PORT`.
+3. Add Turso + bot + admin + optional bank variables; obtain a public HTTPS URL.
+4. Verify `/healthz` and [register webhooks](#register-telegram-and-sepay-webhooks).
 
-## 7. Generic Docker / VPS / EasyPanel
+Review Koyeb's current instance quota and idle behavior before accepting real payments.
+
+## Docker / VPS / EasyPanel
+
+With Turso and all secrets stored in a private `.env` file (never committed):
 
 ```bash
 docker build -t telegram-sales-bot .
-docker run --rm -p 3000:3000 \
-  --env-file .env \
-  --name telegram-sales-bot telegram-sales-bot
+docker run --rm -p 3000:3000 --env-file .env --name telegram-sales-bot telegram-sales-bot
 ```
 
-The `.env` contains `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `SEPAY_WEBHOOK_API_KEY` and bank/admin variables. Keep it outside version control. Use a reverse proxy with HTTPS and persistent system supervision for production.
+Place a TLS reverse proxy in front of port 3000 and ensure the original Host/HTTPS origin is preserved for Web Admin login CSRF protections. Arrange supervised restarts, log retention, security updates and an operator-managed scheduling process. Do **not** expose raw Docker port 3000 as a payment endpoint without HTTPS.
 
-The image intentionally excludes Wrangler and any D1 bindings; it is for Turso-backed Node hosts.
+## Register Telegram and SePay webhooks
 
-## 8. Register webhooks and verify
-
-1. Create a strong random Telegram secret using a safe generator; alphanumeric and underscores/hyphens only.
-2. Run the following **locally**, replacing the URL with your own deployed service:
+Deployment **does not** automatically register the Telegram webhook. In a terminal that has the same bot token and secret as the host:
 
 ```bash
-export BOT_TOKEN='YOUR_REAL_TOKEN'
-export TELEGRAM_WEBHOOK_SECRET='YOUR_RANDOM_SECRET'
-export PUBLIC_BASE_URL='https://your-service.example'
+export BOT_TOKEN='YOUR_TEST_BOT_TOKEN'
+export TELEGRAM_WEBHOOK_SECRET='THE_HOSTS_WEBHOOK_SECRET'
+export PUBLIC_BASE_URL='https://YOUR_PUBLIC_DOMAIN'
 npm run webhook:register
 ```
 
-This calls Telegram `setWebhook` to register `https://your-service.example/telegram/webhook`. The secret must be **identical** in host environment and script. `WORKER_URL` is still accepted as a backwards-compatible alias.
+PowerShell uses `$env:BOT_TOKEN="..."`, `$env:TELEGRAM_WEBHOOK_SECRET="..."` and `$env:PUBLIC_BASE_URL="..."`.
 
-3. Configure SePay API-key authenticated webhook to `https://your-service.example/sepay/webhook`; compare exact account number with `BANK_ACCOUNT_NO`.
-4. Test `/start`, `/catalog`, one Stars purchase, invalid SePay authentication, matching SePay credit and duplicate deliveries on staging/test environment.
-5. Inspect logs and create proper alerts for paid-but-undelivered orders before accepting real payments.
+This registers `https://YOUR_PUBLIC_DOMAIN/telegram/webhook`. **Do not include the path in `PUBLIC_BASE_URL`**. A Telegram token can point to only one active webhook destination; use different tokens for staging and production.
 
-### Hosting caveats
+For physical orders, set SePay's incoming-bank-transfer JSON webhook to `https://YOUR_PUBLIC_DOMAIN/sepay/webhook` using **API Key** authentication and the exact bank account configured in the app. Check [SePay's webhook documentation](https://docs.sepay.vn/tich-hop-webhooks.html) and transaction logs. A 200 response is not proof an order was matched.
 
-- **Cloudflare:** D1 free quotas, no guarantee of unlimited transactions.
-- **Vercel:** serverless timeout, usage quotas and no persistent file writes.
-- **Railway:** always-on containers consume plan credit; Dockerfile supported.
-- **Render:** free tier sleeps, can make payment/webhook timing unreliable.
-- **Koyeb:** check current scale-to-zero settings and quotas.
-- **Turso:** free tier has row/storage limits; check pricing before production.
-- **GitHub Actions:** CI validates code; it does not deploy to third-party platforms without configured secrets/accounts.
+## Verify before real money
 
-For payments, server availability and post-payment notifications matter at least as much as having a successful health check.
+- Check `/healthz` and hosting logs.
+- Test `/start`, `/catalog`, `/orders`, `/language`, `/admin` and unauthorized access.
+- Validate a **controlled** Stars invoice, `pre_checkout_query`, `successful_payment`, key delivery, duplicate event and failed message retry.
+- Validate authorized SePay payload, wrong account/amount, duplicate/late deposits and `/bankreviews`.
+- Confirm migration, backup/restore, cron or alternative maintenance procedure, and alerts.
 
-## P0 maintenance after 0004 migration
-
-**Always run database migrations before swapping a live deployment**: the running code requires `order_expirations`, `bank_payment_reviews` and `star_refunds`.
-
-Cloudflare Workers will expire unapproved orders and retry payment notification every 5 minutes via `[triggers]` cron. On Vercel/Railway/Render/Koyeb/Docker this HTTP app does not include a scheduled daemon; admins must run `/expireorders` and `/retryalerts` or configure a trusted scheduled operator. Never turn an untrusted public endpoint into a maintenance trigger.
-
-To review late bank deposits use `/bankreviews`; `ackbank` is merely an acknowledgement of human reconciliation and **does not** refund money. To refund a Stars charge for a PAID, undelivered digital order use `/refundstars ORDER_ID`; if the result is `NEEDS_REVIEW`, inspect Telegram records before any manual action. Fulfilled orders cannot be refunded by this automated command.
-
-## Web Admin Dashboard
-
-After running migration `0005_web_admin.sql` (with the same D1/Turso migration command above), set `ADMIN_DASHBOARD_PASSWORD` in Cloudflare Worker Secrets, Vercel Environment Variables (production scope), Railway Variables, Render/Koyeb secrets, or your private Docker `.env` file. Generate a random unique 32+ character value and never commit it.
-
-Open `https://YOUR_DEPLOYED_DOMAIN/admin`. The page redirects to a server-verified password login and uses a database session and CSRF. A missing/weak secret disables `/admin` with 503, not a default administrator account. Use HTTPS for cookies. Session expires after 8 hours; logout invalidates it immediately.
-
-The UI handles product CRUD, one-by-one digital-key intake, physical order fulfillment and **review-only** bank/Stars reconciliation. This is the first secure admin MVP, not a full production ERP. There is no automatic shipping notice for a fulfillment action; the operator must confirm shipment with the customer. Never configure production admin/password secrets on public Vercel preview deployments.
-
-## Languages
-
-Apply migration `0006_locales.sql` before upgrading the bot. Telegram auto-detects `from.language_code` for English/Vietnamese and stores a manual choice via `/language`, `/lang vi`, or `/lang en` in the same durable D1/Turso database. Other Telegram locales default to Vietnamese.
-
-Web Admin `/admin?lang=en` switches to English (or `/admin?lang=vi` to Vietnamese) and saves only the language in an admin-scoped Secure cookie. The existing session cookie and CSRF checks are unchanged. Product titles/descriptions are entered by the owner and are not machine-translated.
+See the [payment matrix](PAYMENTS.md) and [operations runbook](OPERATIONS.md). The application is **not yet certified as production ready**.
