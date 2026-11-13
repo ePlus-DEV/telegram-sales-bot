@@ -1,6 +1,6 @@
 # Hướng dẫn bắt đầu — Telegram Sales Bot
 
-[← README](../README.md) · [English](GETTING_STARTED.md) · [Triển khai](DEPLOYMENT.md)
+[← README](../README.md) · [English](GETTING_STARTED.md) · [Triển khai](DEPLOYMENT.md) · [Cấu hình tối thiểu từng nền tảng](MINIMUM_REQUIREMENTS.md)
 
 Hướng dẫn này dành cho **shop thử nghiệm mới**. Không dùng database hoặc token bot production để test.
 
@@ -8,7 +8,7 @@ Hướng dẫn này dành cho **shop thử nghiệm mới**. Không dùng databa
 
 - Cài **Node.js 22+** (khuyến nghị Node 24), Git và terminal.
 - Tạo bot thử nghiệm qua [@BotFather](https://t.me/BotFather), giữ `BOT_TOKEN` bí mật.
-- Có tài khoản Cloudflare (Workers + D1). Nếu chọn Vercel/Railway/Render/Koyeb, cần thêm Turso.
+- Có tài khoản Cloudflare (Workers + D1) nếu dùng phương án serverless đơn giản nhất. Với Vercel/Railway/Render/Koyeb/Docker/Oracle/AWS/Google Cloud/Azure, bản Node hiện cần Turso từ xa. Xem [bảng yêu cầu tối thiểu và hạn mức miễn phí](MINIMUM_REQUIREMENTS.md); hỗ trợ từng nhà cung cấp có thể ở mức tài liệu/Docker dùng chung, chưa phải tích hợp deploy một chạm.
 - Tạo `TELEGRAM_WEBHOOK_SECRET` ngẫu nhiên và mật khẩu `ADMIN_DASHBOARD_PASSWORD` mạnh (nên từ 32 ký tự).
 - Nếu bán **hàng vật lý** qua chuyển khoản: chuẩn bị ngân hàng, VietQR và SePay với webhook API Key.
 
@@ -83,7 +83,8 @@ npm run webhook:register
 
 ## 6. Đọc thêm
 
-- [Triển khai Vercel, Railway, Render, Koyeb, Docker](DEPLOYMENT.md)
+- [Triển khai Cloudflare, Vercel, Railway, Render, Koyeb, Oracle, AWS, Google Cloud và Azure](DEPLOYMENT.md)
+- [Bảng CPU/RAM tối thiểu, database và điều kiện miễn phí](MINIMUM_REQUIREMENTS.md)
 - [Bảng biến môi trường và secret](CONFIGURATION.md)
 - [Danh sách lệnh cho khách và admin](COMMANDS.md)
 - [Luồng thanh toán, hoàn Stars và đối soát](PAYMENTS.md)
