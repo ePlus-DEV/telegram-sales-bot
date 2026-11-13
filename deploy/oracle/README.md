@@ -93,7 +93,19 @@ docker compose up -d
 
 Both services use `restart: unless-stopped`; they restart after an instance reboot as long as Docker is enabled. Do not enable unattended image updates for payment-critical software. Keep Ubuntu security patches and TLS certificates current; Caddy renews certificates automatically.
 
-**Important:** The existing five-minute reconciliation cron is a Cloudflare Worker feature. It does **not** automatically run in this Node/Docker template. Before real payment acceptance, set up a trustworthy Node-hosted periodic reconciliation runner or manually operate `/expireorders` and `/retryalerts` as temporary recovery controls; document delayed-payment and notification-retry risk. Do not expose a publicly callable unauthenticated maintenance URL.
+**Important:** Cloudflare Worker cron does not run on Node automatically. The bundle includes an **on-demand** maintenance runner that performs the existing expiration and outbox-notification retry logic without keeping another service alive:
+
+```bash
+docker compose exec -T bot node scripts/run-maintenance.mjs
+```
+
+To run it every five minutes, install and enable the lightweight OS cron service (`sudo apt-get install -y cron`; `sudo systemctl enable --now cron`) and add a **user crontab** entry using `crontab -e`:
+
+```cron
+*/5 * * * * cd /home/ubuntu/telegram-sales-bot/deploy/oracle && /usr/bin/docker compose exec -T bot node scripts/run-maintenance.mjs >> /home/ubuntu/sales-bot-maintenance.log 2>&1
+```
+
+Change both paths to the actual checkout and log paths. Verify `command -v docker`, and ensure the chosen cron user can use Docker; Docker socket permissions are effectively root-equivalent. The runner deliberately has no public HTTP endpoint. Inspect the log and configure retention/rotation. This runs briefly inside the existing bot container, avoiding a separate always-on scheduler. For failures, `/expireorders` and `/retryalerts` remain temporary manual recovery controls. **Test the schedule and payment release gates before live payments.**
 
 Back up and restore the **external Turso database** according to Turso's procedures, and keep separate backups of payment records. Caddy's certificates persist in the `caddy_data` Docker volume. Review the [operations guide](../../docs/OPERATIONS.md) and [payment release gates](../../ROADMAP.md).
 
