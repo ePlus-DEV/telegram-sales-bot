@@ -1,8 +1,8 @@
-# Deployment — Cloudflare, Vercel, Railway, Render, Koyeb, Docker
+# Deployment — Cloudflare, Vercel, Railway, Render, Koyeb, Docker, Oracle, AWS, GCP and Azure
 
-[← Docs](README.md) · [Getting started](GETTING_STARTED.md) · [Configuration](CONFIGURATION.md) · [Operations](OPERATIONS.md)
+[← Docs](README.md) · [Minimum requirements](MINIMUM_REQUIREMENTS.md) · [Getting started](GETTING_STARTED.md) · [Configuration](CONFIGURATION.md) · [Operations](OPERATIONS.md)
 
-> **All platforms share one application.** Cloudflare Workers use native D1; Vercel/Railway/Render/Koyeb/Docker use durable **Turso/libSQL**. Platform configuration exists in the repo, but no live end-to-end deployment/payment validation has been confirmed.
+> **Runtime support varies.** Cloudflare Workers use D1; existing Node, Vercel and Docker runtimes use **remote Turso/libSQL**. AWS EC2, Google Compute Engine and Azure VMs can **reuse generic Docker** but have no provider-specific IaC or CI/CD. Google Cloud Run and Azure Container Apps are **container candidates**, not verified integrations. See [requirements, free-tier conditions and support status](MINIMUM_REQUIREMENTS.md). No live provider payment E2E has been verified.
 
 ## Comparison
 
@@ -14,9 +14,15 @@
 | Render | Docker/Node HTTP | Turso | Free service can sleep, affecting webhook timing |
 | Koyeb | Docker/Node HTTP | Turso | Validate current free-tier limits, sleep and port settings |
 | Docker/VPS/EasyPanel | Node HTTP in container | Turso | Owner must handle HTTPS, availability and system updates |
-| Oracle Always Free (1 bot) | ARM64 Docker Compose + Caddy | Turso | 1 OCPU / 2 GB baseline; separate Oracle setup, no live payment E2E |
+| Oracle Always Free (1 bot) | ARM64 Docker Compose + Caddy | Turso | 1 OCPU / 2 GB baseline; no live payment E2E |
+| AWS EC2 (Linux VM) | Existing Dockerfile + optional Caddy | Turso | Account-age-dependent credits; manual host setup; no AWS-specific IaC |
+| Google Compute Engine (VM) | Existing Dockerfile + optional Caddy | Turso | `e2-micro` Always Free only in eligible US regions; low RAM |
+| Google Cloud Run | Docker-based managed container | Turso | Candidate, no Cloud Run release/probes/cron or E2E yet |
+| Azure Virtual Machines | Existing Dockerfile + optional Caddy | Turso | Credits/12-month eligibility; manual host setup |
+| Azure Container Apps | Docker-based managed container | Turso | Candidate, no provider deployment manifest/scheduler/E2E yet |
+| InstaBox Free | Node/Docker inside a temporary cloud machine | Turso | 4 vCPU/8 GiB, but mandatory idle pause and max run; not production webhook hosting |
 
-Do not assume free plans guarantee 24/7 delivery. Telegram requires the bot to answer Stars pre-checkout queries quickly (official API: **10 seconds**).
+Do not assume free plans guarantee 24/7 delivery. Telegram requires the bot to answer Stars pre-checkout queries quickly (official API: **10 seconds**). The [minimum requirements guide](MINIMUM_REQUIREMENTS.md) records specific sizing and free-tier constraints for **every** option in this table.
 
 ## Common preparation
 
@@ -123,7 +129,69 @@ Place a TLS reverse proxy in front of port 3000 and ensure the original Host/HTT
 
 ## Oracle Cloud Always Free — lightweight single bot
 
+**Minimum practical starting configuration:** 1 ARM64 `VM.Standard.A1.Flex`, 1 OCPU, **2 GB RAM**, free-eligible boot volume (about 50 GB), Ubuntu 24.04, Docker Engine + Compose plugin, one domain/public IPv4 (80/443), one BotFather token, one Turso database. This is a **recommendation**, not a measured load-based minimum. Full requirements and required `.env`/`app.env` fields are in the [Oracle minimum requirements](../deploy/oracle/README.md#minimum-requirements-for-one-bot).
+
+
+
 For a low-resource ARM64 Ubuntu VPS, use the included [Oracle Compose bundle](../deploy/oracle/README.md): one Node container (512 MB limit), one Caddy reverse proxy (192 MB limit), external Turso, HTTPS on 80/443 and restart on reboot. It deliberately starts **one bot only**; the general [multi-bot architecture](MULTI_BOT.md) stays available for later. The operator-run maintenance script can be invoked via Docker and scheduled with host cron; see [Oracle runbook](../deploy/oracle/README.md). Verify it before accepting real payments.
+
+## AWS EC2 — Docker VM
+
+**Status: reuse Docker; not a native AWS one-click or verified production deployment.** One bot needs Ubuntu Linux x86_64/ARM64, external Turso and a TLS-terminating public endpoint. For a low-traffic bot, **1 vCPU / 2 GB RAM** is a practical *starting target*, not a measured minimum; `t3.small` / ARM64 `t4g.small` are possible 2 GB sizes if they are eligible for your account/credits.
+
+1. Select an EC2 instance and AMI compatible with your account and architecture; verify [AWS EC2 Free Tier](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-free-tier-usage.html) carefully. **Accounts created on/after July 15, 2025 have a credit-based up-to-six-month plan, not a permanent free EC2 instance**. Check IPv4, EBS volume, egress and CPU credit costs, and set billing alerts.
+2. Create an SSH key pair, assign public address and DNS A record. Security Group inbound **80/443** for HTTPS and port **22 only from your IP**; never expose Node port 3000 publicly. Keep outbound HTTPS to Telegram/Turso.
+3. Install Docker Engine/Compose and Git on Ubuntu. Clone this repo and reuse the [single-bot Compose/Caddy bundle](../deploy/oracle/README.md) (its application containers do not depend on Oracle SDKs). Create ignored `.env`/`app.env`, provision **external Turso**, back up DB and apply migrations.
+4. Start the containers; confirm `https://YOUR_DOMAIN/healthz`, test a new BotFather token, then register its webhook deliberately. Enable host cron for `scripts/run-maintenance.mjs` and verify retries before any real payments.
+
+**Not provided:** EC2 launch Terraform/CloudFormation, AWS IAM policies, Route 53 configuration, SSH GitHub Actions deployment or AWS Lambda adapter. [Minimum AWS sizing/cost caveats](MINIMUM_REQUIREMENTS.md#aws-account-creation-date-matters).
+
+## Google Compute Engine — Docker VM
+
+**Status: reuse Docker; no GCE-specific deployment workflow or real-payment validation.** Similar Ubuntu/Turso/Caddy requirements to EC2. Starting recommendation for an ordinary VM is **~2 GB RAM**, not a guaranteed floor. The [Compute Engine Free Program](https://docs.cloud.google.com/free/docs/free-cloud-features) covers up to one **`e2-micro`** eligible VM-month in **`us-west1`, `us-central1` or `us-east1`** with eligible disk/egress limits. It is about **1 GB RAM / shared CPU**, so Docker build, Caddy and webhook spikes need special testing. Larger shapes or Asia regions may charge; set billing budget/alerts.
+
+1. Create the VM with an eligible Linux image, boot disk and permitted region; inspect estimated costs and external IP charges. Allow **80/443** in VPC firewall; SSH only by authorized identity/IP.
+2. Point DNS to the public endpoint, install Docker Engine/Compose, clone the repo and reuse [the existing single-bot Compose guide](../deploy/oracle/README.md), using external Turso and separate test credentials.
+3. Verify HTTPS, schema migrations, Telegram webhook, maintenance cron, logs, quota/timeout behavior and backup/restore before payments.
+
+**Not provided:** GCE provisioning IaC, Cloud DNS/Cloud Armor config, Cloud Build/CD, or live validation. The Always Free `e2-micro` is not the same as a 2 GB VM.
+
+## Google Cloud Run — managed container candidate
+
+**Status: candidate only; Dockerfile exists, but no Cloud Run release workflow or provider E2E.** Cloud Run supports managed HTTPS and scale-to-zero; do **not** run the Oracle Caddy Compose stack inside Cloud Run. Start experimentally with **1 vCPU / 512 MiB** and `min instances = 0`; its CPU/memory/free billing is [usage-based](https://cloud.google.com/run/pricing), not an always-on free VPS.
+
+1. Create a Google Cloud project with billing and budget alerts. Provision remote Turso, apply migrations outside the service and store bot/admin/Turso secrets in Secret Manager (no tokens inside images or source).
+2. Build the existing Dockerfile into a container image via an authorized build pipeline. Deploy a Cloud Run **service** with HTTPS ingress, public webhook availability, environment `PORT` matched to the container target (the Node server uses `process.env.PORT`; Dockerfile exposes **3000**), 1 vCPU/512 MiB initial resources, a small max instance count and managed secrets.
+3. Test `/healthz`, admin origin/CSRF, `/start`, webhook signature rejection, cold starts, 10-second Stars pre-checkout, replay and payment races.
+4. **Schedule reconciliation separately** via a trusted scheduled job (e.g. a Cloud Run Job invoked by Cloud Scheduler with appropriately scoped IAM). `scripts/run-maintenance.mjs` exists, but its packaged job, IAM, scheduling and retry behavior are **not implemented** in this repo. Do not expose a public unauthenticated maintenance endpoint.
+
+Do not claim Cloud Run is deploy-ready until the service config, secrets, scheduler, safe provider probes, billing and payment E2E have been verified.
+
+## Azure Virtual Machines — Docker VM
+
+**Status: reuse Docker; no Azure-specific IaC/CI.** Prefer an Ubuntu Linux VM with **~1 vCPU / 2 GB RAM** initially, external Turso and a Caddy TLS reverse proxy. Azure offers **time-limited** VM free benefits for eligible new accounts/types, not perpetual free VM capacity; additional public IP/disk/network resources may bill. Verify [Azure free benefits](https://learn.microsoft.com/en-us/training/modules/create-an-azure-account) and actual portal estimates first.
+
+Provision one VM, attach a DNS name/public IP, allow 80/443 and restrict SSH in NSG, install Docker Engine/Compose, and follow the [Oracle Compose runbook](../deploy/oracle/README.md) for the shared container stack. Use Azure Key Vault or securely ignored environment files. Keep Turso external; configure cron, backup, controlled webhook registration and full payment tests.
+
+## Azure Container Apps — managed container candidate
+
+**Status: candidate only**; this repo has a Docker image, **not** an Azure Container Apps deployment manifest, image pipeline, secrets/ingress template, or verified E2E. An experimental Consumption-plan starting choice is **0.25 vCPU / 0.5 GiB** (minimum allocation) or **0.5 vCPU / 1 GiB** for extra headroom, one replica maximum, min replicas 0, with external Turso and managed HTTPS. [Azure's free Consumption grant](https://learn.microsoft.com/en-us/azure/container-apps/billing) is usage-limited; monitoring, image registry/network and other services may bill.
+
+Use a trusted container registry, external HTTPS ingress forwarding to Node's application port, provider-managed secrets, a pre-migrated Turso database and a controlled initial test bot. Plan authenticated scheduled maintenance separately through Container Apps Jobs or another trusted scheduler. Do not deploy Caddy as an unnecessary second container inside managed ingress; test the entire payment matrix before accepting funds.
+
+## InstaBox — temporary test environment
+
+**Status: testing candidate, not production hosting.** InstaBox provisions an isolated Linux VM with Node.js/Docker and a [public HTTPS port](https://instabox.sh/docs/ports), so the Node bot can be run there temporarily with its **existing Turso database adapter**. It is **not** a supported perpetual 24/7 service on the Free plan: current [free-plan limits](https://instabox.sh/docs/limits) are **one machine**, **4 vCPU / 8 GiB RAM**, **20 GiB persistent disk by default**, **30-minute fixed idle pause**, and **480-minute maximum run**. The plan cannot disable auto-pause. Do not count on suspended sandboxes to answer Telegram webhooks, especially Stars pre-checkout queries with a 10-second deadline.
+
+For a **non-payment test bot only**:
+
+1. Install the official CLI and create a sandbox following the [InstaBox quick start](https://instabox.sh/docs/start): `instabox login`, then `instabox create --name sales-bot-test --template agent-browser`. Use **a separate test token and test Turso database**.
+2. SSH into the sandbox, clone this repository into the persistent `/data` home/workspace, and install dependencies. Use Node 24 and run `npm run check && npm test`; configure a private environment file outside Git. Never use live payment/customer secrets in a disposable sandbox.
+3. For short-lived testing, run the Node server on port 3000 in the machine (using `PORT=3000` and a **durable remote Turso** connection), then use `instabox port publish sales-bot-test 3000` from the CLI to obtain the public HTTPS URL. Test `/healthz` before doing anything else. The exact published URL is supplied by InstaBox and must not be guessed.
+4. **Only after explicit operator intent**, use `PUBLIC_BASE_URL` with the actual public HTTPS origin to register the **test Telegram bot** webhook. Note that a bot has only one active webhook; registering a disposable URL replaces its old destination.
+5. Stop the bot experiment before the sandbox pauses. Remove or redirect the test webhook to a stable host when the experiment ends. Background maintenance/cron on paused machines will not be reliable. For production use Cloudflare Workers + D1 or an always-on VM with verified operations and E2E payment tests.
+
+**No InstaBox API credentials, machine or live deployment are included in this repository.** The sandbox can compile/run the code; it does **not** demonstrate production readiness, uptime or safe payment processing.
 
 ## Register Telegram and SePay webhooks
 

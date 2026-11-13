@@ -6,6 +6,7 @@
 | --- | --- |
 | Install and test a bot | [Getting started (English)](GETTING_STARTED.md) / [Bắt đầu (Tiếng Việt)](GETTING_STARTED.vi.md) |
 | Deploy a specific hosting service | [Deployment guide](DEPLOYMENT.md) |
+| Compare minimum RAM/CPU and free-tier rules across all cloud services | [Minimum requirements matrix](MINIMUM_REQUIREMENTS.md) |
 | Run one bot on Oracle Always Free | [Oracle minimal Compose guide](../deploy/oracle/README.md) |
 | Host multiple isolated bots on one app | [Multi-bot guide](MULTI_BOT.md) |
 | Run non-destructive staging checks | [Staging validation](STAGING_VALIDATION.md) |

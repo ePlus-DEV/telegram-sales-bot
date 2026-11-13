@@ -1,6 +1,6 @@
 # Configuration & environment variables
 
-[← Docs](README.md) · [Deployment](DEPLOYMENT.md) · [Payments](PAYMENTS.md)
+[← Docs](README.md) · [Deployment](DEPLOYMENT.md) · [Minimum requirements](MINIMUM_REQUIREMENTS.md) · [Payments](PAYMENTS.md)
 
 Use **hosting secrets** for credentials. For several bots in one running deployment, read [multi-bot setup](MULTI_BOT.md): use `MULTI_BOTS`, one HTTPS hostname per bot, prefixed secrets and isolated databases. The unprefixed names below remain the legacy **single-bot** configuration. The examples `../.env.example` and `../.dev.vars.example` are templates, not values to commit with real data. Store admin passwords, Telegram tokens, Turso auth tokens, and SePay API keys outside Git.
 
@@ -39,12 +39,13 @@ TTL values must be integers from **5 to 10080** minutes; unsupported values use 
 - Use `npm run db:migrate` for remote D1 and `npm run db:migrate:local` for a local test database.
 - Set secrets with `npx wrangler secret put NAME`; place non-sensitive variables in the Worker dashboard or `[vars]`.
 
-**Vercel / Railway / Render / Koyeb / Docker**
+**Vercel / Railway / Render / Koyeb / Docker / AWS EC2 / Google Compute Engine / Cloud Run / Azure VM / Azure Container Apps**
 
 - Create persistent external Turso/libSQL storage.
 - Set **both** `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` in the host's secrets.
 - Apply schema using `npm run db:migrate:turso` from a local terminal with those environment variables set.
 - Do **not** substitute an ephemeral local `.db` file. Do not assume data is copied when switching from D1 to Turso.
+- For AWS EC2, Google Compute Engine and Azure VM, the existing Docker + HTTPS stack can be reused, but cloud-specific IaC and automated deploy are not present. Cloud Run and Azure Container Apps are unverified container candidates; each requires provider-managed HTTPS, secrets and trusted maintenance scheduling. See [provider minima](MINIMUM_REQUIREMENTS.md).
 
 ## Webhook endpoints
 

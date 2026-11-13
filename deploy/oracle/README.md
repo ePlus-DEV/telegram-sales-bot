@@ -6,6 +6,63 @@ This optional, **single-bot** template runs one Node.js 24 application and a Cad
 
 **Not production-certified.** No real Oracle/Stars/SePay end-to-end deployment has been verified. Do not accept live payments until the project's payment release gates have been completed.
 
+## Minimum requirements for one bot
+
+The table distinguishes the **code/runtime requirements** from a conservative Oracle VM sizing recommendation. Actual throughput, peak RSS, cold starts, and real-payment callback latency have **not been benchmarked** on Oracle.
+
+| Item | Required to run this source | Recommended initial Oracle Always Free choice |
+| --- | --- | --- |
+| CPU / architecture | Linux with Node.js 22+; Docker images support `linux/arm64` | **1 OCPU**, `VM.Standard.A1.Flex` (ARM64) |
+| RAM | No proven hardware minimum; Compose caps bot at **512 MB** and Caddy at **192 MB**, *excluding* OS/Docker/build overhead | **2 GB RAM** (room for Ubuntu, Docker, TLS and build spikes) |
+| Storage | Persistent storage for Docker images, logs and Caddy certificate volume; app data is in **remote Turso**, not the container | Oracle free-eligible boot volume, **47 GB documented minimum / 50 GB common default** |
+| OS / packages | Linux with Docker Engine, `docker compose` plugin and Git; Node 24 is inside the Docker image | **Ubuntu 24.04 LTS ARM64** |
+| Public connectivity | DNS A record for a domain you control, public IPv4, HTTPS TCP **443**; inbound **80** for automatic TLS; outbound HTTPS for Telegram/Turso | OCI VCN/NSG inbound 80/443; SSH **22** only from your IP; do **not** expose Node port **3000** |
+| Database | **1 persistent Turso/libSQL DB** with its URL/token and all migrations applied | External Turso; no database service on this VPS |
+| Telegram | **1 BotFather token** and unique webhook secret, configured HTTPS webhook | A separate *test bot* for initial validation |
+| Administration | Numeric Telegram admin ID and **16+ character** dashboard password (32+ random recommended) | Keep credentials in ignored `app.env`, not source/GitHub |
+| Operations | Docker service enabled on boot; secure secrets; provider callbacks must be validated before live payments | Host cron invoking the included maintenance script every 5 minutes, backups and log review |
+
+**Clarification:** 512 + 192 MB are container **limits**, not total VPS RAM consumption or measured load. A 1 GB `VM.Standard.E2.1.Micro` is potentially usable for experimentation but can be CPU/memory constrained; this project does **not** certify it for production payments. Oracle may have capacity restrictions, resource reclamation or changes to eligible shapes; check your home region, the **Always Free** label and tenancy quotas before creating anything. See [Oracle's Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm) and [Docker's installation guide](https://docs.docker.com/engine/install/ubuntu/).
+
+### Exact credentials and files needed
+
+For the **single-bot** Oracle bundle, only these settings are required to start and test the default application:
+
+| File | Required settings | Where to obtain |
+| --- | --- | --- |
+| `deploy/oracle/.env` | `SITE_DOMAIN`, `CADDY_EMAIL` | Your DNS hostname and certificate contact email |
+| `deploy/oracle/app.env` | `BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` | [@BotFather](https://t.me/BotFather), plus your own random secret |
+| `deploy/oracle/app.env` | `ADMIN_TELEGRAM_ID`, `ADMIN_DASHBOARD_PASSWORD` | Telegram numeric account ID, strong unique password |
+| `deploy/oracle/app.env` | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Remote persistent Turso database and auth token |
+
+Optional: `SEPAY_WEBHOOK_API_KEY`, `BANK_BIN`, `BANK_ACCOUNT_NO`, `BANK_ACCOUNT_NAME` are needed **together only for eligible physical sales using SePay/VietQR**. `SUPPORT_USERNAME` is optional. **No `MULTI_BOTS`, `SHOP_A_*` variables or extra VPS are needed for one bot.** No secrets belong in `.env.example`, `app.env.example`, GitHub or build logs.
+
+### Minimum first-run checklist
+
+1. Confirm **1 free-eligible VM** (ARM64, 1 OCPU, 2 GB), public IPv4, DNS A record and OCI ingress 80/443. Restrict SSH to your IP; make sure your instance can reach Telegram and Turso over HTTPS.
+2. Install Docker Engine + Compose plugin and Git on Ubuntu; enable Docker. Clone this repo.
+3. Copy `deploy/oracle/.env.example` to `.env`, and `app.env.example` to `app.env`; configure only the fields in the table and protect both files with `chmod 600`.
+4. From `deploy/oracle`, run the offline Compose configuration check and **Turso preflight** (checks names/formats; never prints secret values):
+
+   ```bash
+   docker compose config --quiet
+   docker compose build
+   docker compose run --rm --no-deps bot npm run staging:preflight -- --provider=turso
+   ```
+
+5. Back up or start with an **empty test Turso database**, then apply migrations once, start the containers and check HTTPS:
+
+   ```bash
+   docker compose run --rm --no-deps bot npm run db:migrate:turso
+   docker compose up -d
+   docker compose ps
+   curl --fail --show-error https://YOUR_DOMAIN/healthz
+   ```
+
+6. After HTTPS is healthy, intentionally register your **test bot** webhook and check `/start`, `/catalog` and admin login. Configure host cron as shown below; do not accept real payments until reconciliation and controlled provider payment E2E are verified.
+
+**Automatic deployment:** This bundle **does not** include unattended CI/CD to Oracle. The current GitHub CI validates code, Compose and Docker builds, but first VM setup, secrets, TLS/DNS and actual deployment are operator-managed. Do not interpret green CI or `/healthz` as proof of real-payment readiness.
+
 ## Suggested size and limits
 
 - **VM.Standard.A1.Flex**, **1 OCPU**, **2 GB RAM**, Ubuntu 24.04 ARM64, minimum eligible boot volume (currently **47 GB**).

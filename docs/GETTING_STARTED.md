@@ -1,6 +1,6 @@
 # Getting started — first test bot
 
-[← README](../README.md) · [Tiếng Việt](GETTING_STARTED.vi.md) · [Deployment options](DEPLOYMENT.md)
+[← README](../README.md) · [Tiếng Việt](GETTING_STARTED.vi.md) · [Deployment options](DEPLOYMENT.md) · [Provider minimums](MINIMUM_REQUIREMENTS.md)
 
 This guide is for a **new test shop**, not a migration of an existing production database. A Telegram bot token is a secret; do not post it in issues, PRs or screenshots.
 
@@ -8,7 +8,7 @@ This guide is for a **new test shop**, not a migration of an existing production
 
 - Node.js **22 or newer** (24 recommended), Git, terminal access.
 - A new **test Telegram bot** created through [@BotFather](https://t.me/BotFather); record its token privately.
-- For easiest serverless setup: a Cloudflare account with Workers and D1 access.
+- For easiest serverless setup: a Cloudflare account with Workers and D1 access. AWS/GCP/Azure VM deployments can reuse generic Docker; managed Cloud Run and Azure Container Apps are unverified candidates. Compare their resource constraints and free-tier eligibility in [provider minimums](MINIMUM_REQUIREMENTS.md).
 - Optional physical payments: a bank account with a supported VietQR BIN and a SePay account configured for authenticated webhooks.
 - A unique randomly generated `ADMIN_DASHBOARD_PASSWORD` (32+ characters recommended), plus your numeric `ADMIN_TELEGRAM_ID`.
 
