@@ -6,7 +6,13 @@ import { dirname, join, normalize, relative, resolve } from 'node:path';
 const root = resolve('.');
 const docs = [
   'README.md','ROADMAP.md','AGENTS.md','CONTRIBUTING.md','SECURITY.md',
-  ...readdirSync(resolve('docs')).filter(x=>x.endsWith('.md')).map(x=>'docs/'+x)
+  ...readdirSync(resolve('docs')).filter(x=>x.endsWith('.md')).map(x=>'docs/'+x),
+  // Include standalone provider runbooks, not only the documentation folder.
+  ...readdirSync(resolve('deploy'),{withFileTypes:true})
+    .filter(entry=>entry.isDirectory())
+    .flatMap(entry=>readdirSync(resolve('deploy',entry.name))
+      .filter(file=>file.endsWith('.md'))
+      .map(file=>'deploy/'+entry.name+'/'+file))
 ];
 function headingSlug(text) {
   return text.toLowerCase().replace(/<[^>]*>/g,'').replace(/[\x60*_~]/g,'')
