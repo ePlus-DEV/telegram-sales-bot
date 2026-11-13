@@ -1,45 +1,50 @@
-# Hướng dẫn bắt đầu — Telegram Sales Bot
+# Bắt đầu — chạy bot thử nghiệm đầu tiên
 
-[← README](../README.md) · [English](GETTING_STARTED.md) · [Triển khai](DEPLOYMENT.md) · [Cấu hình tối thiểu từng nền tảng](MINIMUM_REQUIREMENTS.md)
+[← Tài liệu](README.md) · [English](GETTING_STARTED.md) · [Cấu hình](CONFIGURATION.md) · [Nơi triển khai](DEPLOYMENT.md)
 
-Hướng dẫn này dành cho **shop thử nghiệm mới**. Không dùng database hoặc token bot production để test.
+Hướng dẫn này để chạy **một bot thử nghiệm**, **không phải** quy trình mở bán production. Không dùng token, database hay key sản phẩm thật trong môi trường thử nghiệm.
 
 ## 1. Chuẩn bị
 
-- Cài **Node.js 22+** (khuyến nghị Node 24), Git và terminal.
-- Tạo bot thử nghiệm qua [@BotFather](https://t.me/BotFather), giữ `BOT_TOKEN` bí mật.
-- Có tài khoản Cloudflare (Workers + D1) nếu dùng phương án serverless đơn giản nhất. Với Vercel/Railway/Render/Koyeb/Docker/Oracle/AWS/Google Cloud/Azure, bản Node hiện cần Turso từ xa. Xem [bảng yêu cầu tối thiểu và hạn mức miễn phí](MINIMUM_REQUIREMENTS.md); hỗ trợ từng nhà cung cấp có thể ở mức tài liệu/Docker dùng chung, chưa phải tích hợp deploy một chạm.
-- Tạo `TELEGRAM_WEBHOOK_SECRET` ngẫu nhiên và mật khẩu `ADMIN_DASHBOARD_PASSWORD` mạnh (nên từ 32 ký tự).
-- Nếu bán **hàng vật lý** qua chuyển khoản: chuẩn bị ngân hàng, VietQR và SePay với webhook API Key.
+Cần **Node.js 22+ (khuyến nghị 24)**, Git, terminal, **token bot mới** từ [@BotFather](https://t.me/BotFather), Telegram ID dạng số của quản trị viên và mật khẩu Web Admin ngẫu nhiên tối thiểu 16 ký tự (khuyến nghị 32+).
 
-## 2. Lấy mã nguồn
+| Phương án | Database | Khi nào chọn |
+| --- | --- | --- |
+| **Cloudflare Workers** | **D1** | Đơn giản nhất để test; không cần VPS |
+| **Node.js / Docker / Vercel** | **Turso/libSQL từ xa** | Muốn chạy ứng dụng trên host khác |
+
+Source **chưa hỗ trợ trực tiếp** PostgreSQL/Neon/Supabase hoặc SQLite local. Xem [database thực sự được hỗ trợ](DATABASES.md) và [bảng yêu cầu host](MINIMUM_REQUIREMENTS.md).
+
+## 2. Tải và kiểm tra source
 
 ```bash
 git clone https://github.com/ePlus-DEV/telegram-sales-bot.git
 cd telegram-sales-bot
 npm install
 npm run check
+npm run staging:check-migrations
 npm test
 npm run docs:check
 ```
 
-## 3. Triển khai nhanh với Cloudflare Workers + D1
+Các lệnh trên chỉ kiểm tra **offline**, không tự deploy, không tạo database trên cloud và không đăng ký webhook.
+
+## 3. Khởi tạo database và deploy
+
+### Phương án A — Cloudflare Workers + D1
 
 ```bash
 npx wrangler login
 npx wrangler d1 create eplus-telegram-sales-bot
 ```
 
-Thay `REPLACE_WITH_YOUR_D1_DATABASE_ID` trong `wrangler.toml` bằng UUID vừa tạo. Sau đó:
+Thay `REPLACE_WITH_YOUR_D1_DATABASE_ID` trong `wrangler.toml` bằng UUID D1 vừa tạo, giữ binding tên `DB`. Kiểm tra đúng **database thử nghiệm**, sau đó áp dụng migration **0001–0006**:
 
 ```bash
 npm run db:migrate
-npm run deploy
 ```
 
-Lệnh migration áp dụng **toàn bộ schema 0001–0006 vào D1 từ xa**. Không bỏ qua migration vì bot đã dùng bảng đơn hàng, thanh toán, admin và ngôn ngữ.
-
-Khai báo secrets trên Cloudflare:
+Lưu secrets trong Cloudflare:
 
 ```bash
 npx wrangler secret put BOT_TOKEN
@@ -47,46 +52,69 @@ npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put ADMIN_DASHBOARD_PASSWORD
 ```
 
-Thiết lập `ADMIN_TELEGRAM_ID` và các biến ngân hàng nếu sử dụng chuyển khoản; xem [bảng cấu hình](CONFIGURATION.md). **Không nhập token/mật khẩu thật vào GitHub.** Thiếu mật khẩu admin thì `/admin` trả 503.
+Khai báo thêm `ADMIN_TELEGRAM_ID` qua cấu hình biến môi trường. Nếu bán **hàng vật lý hợp lệ** bằng VietQR/SePay, đọc [bảng cấu hình](CONFIGURATION.md) để bổ sung biến ngân hàng. Sau đó:
 
-## 4. Đăng ký Telegram webhook
-
-Chỉ thực hiện khi bạn đã có URL public HTTPS. Trên **Windows PowerShell**:
-
-```powershell
-$env:BOT_TOKEN = "TOKEN_BOT_THU_NGHIEM"
-$env:TELEGRAM_WEBHOOK_SECRET = "GIONG_SECRET_TREN_CLOUDFLARE"
-$env:PUBLIC_BASE_URL = "https://TEN_WORKER.workers.dev"
-npm run webhook:register
+```bash
+npm run deploy
 ```
 
-Trên Linux/macOS:
+Truy cập `https://YOUR_WORKER.workers.dev/healthz` bằng URL được Cloudflare cấp.
+
+### Phương án B — Node.js / Docker + Turso
+
+Tạo **database Turso thử nghiệm mới**, lấy URL và auth token. Chỉ chạy migration khi đã xác nhận đúng database:
+
+```bash
+export TURSO_DATABASE_URL='libsql://YOUR_TEST_DB.turso.io'
+export TURSO_AUTH_TOKEN='YOUR_PRIVATE_TEST_TOKEN'
+npm run db:migrate:turso
+```
+
+Nếu dùng Windows PowerShell, thay `export` bằng `$env:TURSO_DATABASE_URL="..."` và `$env:TURSO_AUTH_TOKEN="..."`.
+
+Chọn dịch vụ ở [Hướng dẫn triển khai](DEPLOYMENT.md), hoặc dùng [Deploy badges](DEPLOY_BUTTONS.md). Đặt URL/token Turso cùng các biến bot/Admin ở kho secrets của host. Docker sử dụng `PORT` (mặc định 3000) và cần HTTPS bên ngoài. **Docker không tự chạy migration hoặc lịch đối soát**; xem [Vận hành](OPERATIONS.md#scheduling-and-retries).
+
+## 4. Đăng ký Telegram webhook thủ công
+
+Sau khi HTTPS hoạt động, nhập **origin HTTPS thực tế** (không thêm `/telegram/webhook`):
 
 ```bash
 export BOT_TOKEN='TOKEN_BOT_THU_NGHIEM'
-export TELEGRAM_WEBHOOK_SECRET='GIONG_SECRET_TREN_HOST'
-export PUBLIC_BASE_URL='https://TEN_WORKER.workers.dev'
+export TELEGRAM_WEBHOOK_SECRET='BI_MAT_GIONG_VOI_HOST'
+export PUBLIC_BASE_URL='https://TEN_HOST_THUC_TE'
 npm run webhook:register
 ```
 
-Đây là thao tác gọi `setWebhook`, **không tự diễn ra chỉ vì bạn deploy code**. Mỗi token Telegram chỉ nhận một webhook đang hoạt động; nên tách bot staging và production.
+**Windows PowerShell:**
 
-## 5. Kiểm tra lần đầu
+```powershell
+$env:BOT_TOKEN = "TOKEN_BOT_THU_NGHIEM"
+$env:TELEGRAM_WEBHOOK_SECRET = "BI_MAT_GIONG_VOI_HOST"
+$env:PUBLIC_BASE_URL = "https://TEN_HOST_THUC_TE"
+npm run webhook:register
+```
 
-1. Truy cập `https://TEN_WORKER.workers.dev/healthz` — xác nhận máy chủ có phản hồi.
-2. Trong Telegram, thử `/start`, `/language`, `/catalog`.
-3. Mở `https://TEN_WORKER.workers.dev/admin`, đăng nhập và tạo sản phẩm số mẫu; thêm **key giả để thử nghiệm**.
-4. Kiểm tra catalog, link Stars, trạng thái đơn, và khả năng truy cập `/mykey MÃ_ĐƠN` (chỉ chủ đơn).
-5. Nếu bật hàng vật lý, khai báo SePay webhook trỏ đến `/sepay/webhook`, đúng tài khoản và API key; kiểm tra trường hợp tiền đến chậm/trùng/sai số tiền.
+Mỗi token Telegram chỉ có **một webhook đang hoạt động**. Tuyệt đối không dùng bot production để đăng ký sang preview hoặc InstaBox tạm thời.
 
-**Lưu ý:** Sản phẩm số bán trong Telegram dùng **Telegram Stars**, không thay bằng VietQR/SePay. VietQR + SePay chỉ dành cho hàng hóa/dịch vụ vật lý được phép. Chưa có xác nhận kiểm thử tiền thật và chưa nên mở cho khách hàng production.
+## 5. Kiểm tra bot
 
-## 6. Đọc thêm
+1. Mở `/healthz` (HTTP 200 **chưa** chứng minh database/thanh toán hoạt động).
+2. Nhắn `/start`, `/language`, `/catalog` cho bot thử nghiệm.
+3. Mở `https://TEN_HOST_THUC_TE/admin`, đăng nhập, tạo sản phẩm mẫu và nhập **key giả**.
+4. Kiểm tra đơn hàng, webhook không hợp lệ bị từ chối và người không có quyền không vào Admin được.
+5. Nếu thử thanh toán vật lý, chỉ dùng thông tin thử nghiệm và xác minh riêng webhook xác thực của SePay.
+6. Xem log, lịch xử lý đơn hết hạn và gửi lại thông báo nếu dùng Node/Docker.
 
-- [Triển khai Cloudflare, Vercel, Railway, Render, Koyeb, Oracle, AWS, Google Cloud và Azure](DEPLOYMENT.md)
-- [Bảng CPU/RAM tối thiểu, database và điều kiện miễn phí](MINIMUM_REQUIREMENTS.md)
-- [Bảng biến môi trường và secret](CONFIGURATION.md)
-- [Danh sách lệnh cho khách và admin](COMMANDS.md)
-- [Luồng thanh toán, hoàn Stars và đối soát](PAYMENTS.md)
-- [Khắc phục lỗi, backup và vận hành](OPERATIONS.md)
-- [Roadmap và những phần chưa hoàn thành](../ROADMAP.md)
+**Chưa nên nhận tiền thật:** cần hoàn thành [kiểm thử staging](STAGING_VALIDATION.md), [luồng thanh toán](PAYMENTS.md) và [release gates](../ROADMAP.md#p0--release-blockers-deferred-execution-required-for-launch).
+
+## Khắc phục nhanh
+
+| Vấn đề | Cần kiểm tra |
+| --- | --- |
+| `/healthz` OK nhưng bot không trả lời | Token, URL `setWebhook`, secret, log |
+| Lỗi thiếu bảng | UUID D1 / URL Turso, đủ migrations, đúng database |
+| Admin trả 503 | Thiếu mật khẩu Admin hoặc ngắn hơn 16 ký tự |
+| Không đăng nhập được | HTTPS, Host và `X-Forwarded-Proto`, cookie/CSRF |
+| Thanh toán thành công nhưng không nhận key | Ledger/outbox và `/mykey ORDER_ID`, không giao key lặp |
+
+[Hướng dẫn vận hành](OPERATIONS.md) · [Danh mục tài liệu](README.md)

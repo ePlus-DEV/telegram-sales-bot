@@ -1,7 +1,7 @@
 # AI and contributor instructions
 
 ## Purpose
-Build a small, secure, source-available Telegram shop for Cloudflare Workers + D1.
+Build a small, secure, source-available Telegram shop for Cloudflare Workers + D1 and portable Node/Docker deployments backed by remote Turso/libSQL. Do not claim other database engines are supported without an adapter and migrations/tests.
 
 ## Non-negotiable requirements
 1. No credentials, Telegram token, bank account details, webhook secrets, or customer inventory in commits, issues, build logs, or test snapshots.
@@ -38,10 +38,10 @@ Node.js 24 preferred. Run `npm run check`, `npm test` and validate the Docker bu
 - Add tests for locale switching, auto-detection, fallback, background notifications and English admin login. Do not break legacy Vietnamese flows.
 
 ## Documentation maintenance
-- Keep README concise: feature summary, deploy matrix, getting-started links, safety caveats and roadmap link. Detailed migration/gateway/runbook guidance belongs in `docs/`.
+- Keep README concise: feature summary, actual deployment status, safe Deploy badges, getting-started links and roadmap. Detailed runbooks belong in `docs/` and `deploy/*/README.md`; use `docs/README.md` as the documentation index and keep `docs/DATABASES.md` and `docs/ARCHITECTURE.md` aligned with actual code.
 - Treat [ROADMAP.md](ROADMAP.md) as the project-level delivery plan; distinguish implemented code, partial functionality, deployment verification and release gates.
 - Never imply that CI means verified payments or production readiness. Do not claim a host was deployed unless an end-to-end test actually ran.
-- Keep English/Vietnamese getting-started guides consistent and run `npm run docs:check` after changing Markdown links.
+- Keep English/Vietnamese getting-started guides consistent and run `npm run docs:check` after changing Markdown links (including runbooks under `deploy/`). Avoid hardcoding changing cloud free quotas unless verified against the provider's current official documentation.
 
 ## Staging verification rules
 - PR CI may run disposable SQLite migrations and local Worker mocks, but must never deploy or call a live payment provider.

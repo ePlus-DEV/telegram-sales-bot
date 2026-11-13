@@ -110,4 +110,4 @@ Requests never follow 30x redirects, do not emit webhook authentication secrets,
 - Set up staging Telegram bot webhook and SePay test callback **manually** with safe separate credentials.
 - Run the [payment matrix](PAYMENTS.md) with a controlled test environment; capture Stars pre-checkout/settlement, SePay matching/late/duplicate credits, refund results, and delivered key audit evidence.
 - Prove backup/restore into isolated staging, alerting, approved-but-abandoned Stars checkout reconciliation and resilience to hosting cold starts.
-- Do not mark `v1.0.0` or close outstanding #5/#6 solely because this workflow passes.
+- Do not mark `v1.0.0` or close outstanding #5/#6 solely because this workflow passes. See [Database compatibility](DATABASES.md): disposable SQLite mocks do **not** constitute a supported production local SQLite adapter.

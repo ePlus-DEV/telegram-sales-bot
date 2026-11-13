@@ -1,225 +1,176 @@
-# Deployment — Cloudflare, Vercel, Railway, Render, Koyeb, Docker, Oracle, AWS, GCP and Azure
+# Deployment guide
 
-[← Docs](README.md) · [Deploy buttons](DEPLOY_BUTTONS.md) · [Minimum requirements](MINIMUM_REQUIREMENTS.md) · [Getting started](GETTING_STARTED.md) · [Configuration](CONFIGURATION.md) · [Operations](OPERATIONS.md)
+[← Documentation](README.md) · [Getting started](GETTING_STARTED.md) · [Provider requirements](MINIMUM_REQUIREMENTS.md) · [Deploy buttons](DEPLOY_BUTTONS.md)
 
-> **Runtime support varies.** Cloudflare Workers use D1; existing Node, Vercel and Docker runtimes use **remote Turso/libSQL**. AWS EC2, Google Compute Engine and Azure VMs can **reuse generic Docker** but have no provider-specific IaC or CI/CD. Google Cloud Run and Azure Container Apps are **container candidates**, not verified integrations. See [requirements, free-tier conditions and support status](MINIMUM_REQUIREMENTS.md). No live provider payment E2E has been verified.
+Choose a hosting model **before** entering credentials or registering the bot webhook. This guide distinguishes what is **implemented in this repository** from what still requires **manual infrastructure** or is only a **candidate**. No provider has been certified with live payment/refund end-to-end tests.
 
-## Comparison
+## Choose a hosting model
 
-| Host | Runtime | Persistent DB | Main caution |
+| Platform | Code/config status | Database | Primary guide |
 | --- | --- | --- | --- |
-| Cloudflare Workers | Worker Fetch handlers | D1 | Worker/D1 free-plan quotas and scheduled Cron behavior |
-| Vercel | Functions + rewrites | Turso | No persistent function filesystem; execution-time limits |
-| Railway | Docker/Node HTTP | Turso | Usage credit/cost and uptime need checking |
-| Render | Docker/Node HTTP | Turso | Free service can sleep, affecting webhook timing |
-| Koyeb | Docker/Node HTTP | Turso | Validate current free-tier limits, sleep and port settings |
-| Docker/VPS/EasyPanel | Node HTTP in container | Turso | Owner must handle HTTPS, availability and system updates |
-| Oracle Always Free (1 bot) | ARM64 Docker Compose + Caddy | Turso | 1 OCPU / 2 GB baseline; no live payment E2E |
-| AWS EC2 (Linux VM) | Existing Dockerfile + optional Caddy | Turso | Account-age-dependent credits; manual host setup; no AWS-specific IaC |
-| Google Compute Engine (VM) | Existing Dockerfile + optional Caddy | Turso | `e2-micro` Always Free only in eligible US regions; low RAM |
-| Google Cloud Run | Docker-based managed container | Turso | Candidate, no Cloud Run release/probes/cron or E2E yet |
-| Azure Virtual Machines | Existing Dockerfile + optional Caddy | Turso | Credits/12-month eligibility; manual host setup |
-| Azure Container Apps | Docker-based managed container | Turso | Candidate, no provider deployment manifest/scheduler/E2E yet |
-| InstaBox Free | Node/Docker inside a temporary cloud machine | Turso | 4 vCPU/8 GiB, but mandatory idle pause and max run; not production webhook hosting |
+| Cloudflare Workers | Worker, D1 binding and cron defined | **D1** | [Cloudflare Workers + D1](#cloudflare-workers--d1) |
+| Vercel | Function entrypoints and rewrites present | **Turso** | [Vercel + Turso](#vercel--turso) |
+| Railway | Shared Dockerfile and optional IaC example | **Turso** | [Railway + Turso](#railway--turso) |
+| Render | Docker Blueprint file present | **Turso** | [Render + Turso](#render--turso) |
+| Koyeb | Shared Dockerfile; setup wizard | **Turso** | [Koyeb + Turso](#koyeb--turso) |
+| Generic VPS/EasyPanel | Node Dockerfile; operator-owned HTTPS | **Turso** | [Docker / VPS / EasyPanel](#docker--vps--easypanel) |
+| Oracle Always Free | Docker Compose + Caddy + host cron example | **Turso** | [Oracle runbook](../deploy/oracle/README.md) |
+| AWS EC2, Google Compute Engine, Azure VM | **Generic Docker reuse**; no provider IaC | **Turso** | [Manual VM instructions](#aws-ec2--docker-vm) |
+| Google Cloud Run / Azure Container Apps | **Candidates**; no complete release/scheduler integration | **Turso** | [Managed container caveats](#google-cloud-run--managed-container-candidate) |
+| InstaBox | Setup/run scripts for temporary testing | **Test Turso** | [InstaBox runbook](../deploy/instabox/README.md) |
+| AWS Lambda | No compatible event adapter | — | [Architecture](ARCHITECTURE.md) |
 
-Do not assume free plans guarantee 24/7 delivery. Telegram requires the bot to answer Stars pre-checkout queries quickly (official API: **10 seconds**). The [minimum requirements guide](MINIMUM_REQUIREMENTS.md) records specific sizing and free-tier constraints for **every** option in this table.
+**A README Deploy badge starts the provider's setup wizard**, not the migration, secrets, test webhook or release certification. See [Deploy buttons](DEPLOY_BUTTONS.md) and [minimum resource expectations](MINIMUM_REQUIREMENTS.md). Free-tier terms and regional availability must be checked in the provider's current official documentation.
 
-## Common preparation
+## Shared requirements for every host
 
-From a local checkout:
-
-```bash
-git clone https://github.com/ePlus-DEV/telegram-sales-bot.git
-cd telegram-sales-bot
-npm install
-npm run check
-npm test
-npm run docs:check
-```
-
-For multiple bots served by the **same** deployment, follow [multi-bot deployment](MULTI_BOT.md) to provision one HTTPS host, credentials and database per bot. The single-bot steps below otherwise remain valid.
-
-Create a separate **staging bot token/database**. Read [configuration](CONFIGURATION.md). Set `BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ADMIN_TELEGRAM_ID`, and `ADMIN_DASHBOARD_PASSWORD` in hosting secret/environment settings. If enabling eligible physical orders, set bank details and `SEPAY_WEBHOOK_API_KEY`.
+1. New **test** BotFather token and a separate database; do not reuse a production bot token/database.
+2. Durable storage: **D1** only inside the current Worker binding, or **remote Turso/libSQL** for Node/Vercel/Docker. [Database compatibility](DATABASES.md) explains unsupported alternatives.
+3. Schema migrations 0001–0006 applied to the **correct database** by an operator after backup/verification.
+4. Required private bot/admin secrets listed in [Configuration](CONFIGURATION.md); no tokens in Git or a published Docker image.
+5. Reachable HTTPS URL, correct `Host` / `X-Forwarded-Proto` for Web Admin Origin checks, and Telegram's webhook registered **manually**.
+6. Trusted expiry and notification retry scheduling. Cloudflare has cron; Node hosts need a separately configured runner. See [Operations](OPERATIONS.md#scheduling-and-retries).
+7. Controlled staging, backups, 10-second Stars pre-checkout responsiveness and [P0 release checks](../ROADMAP.md#p0--release-blockers-deferred-execution-required-for-launch) **before real payments**.
 
 ## Cloudflare Workers + D1
 
-1. Run `npx wrangler login`.
-2. Create a database: `npx wrangler d1 create eplus-telegram-sales-bot`.
-3. Replace `REPLACE_WITH_YOUR_D1_DATABASE_ID` in `../wrangler.toml` with the new UUID. The Worker binding **must** be named `DB`.
-4. Apply **all** migrations `0001–0006` to the remote D1 database:
+**Existing integration, no VPS.** Follow [Getting started](GETTING_STARTED.md#option-a--cloudflare-workers--d1) for the full commands.
 
-   ```bash
-   npm run db:migrate
-   ```
+```bash
+npx wrangler login
+npx wrangler d1 create eplus-telegram-sales-bot
+# Put the returned UUID in wrangler.toml: database_id
+npm run db:migrate
+npx wrangler secret put BOT_TOKEN
+npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+npx wrangler secret put ADMIN_DASHBOARD_PASSWORD
+# Also set ADMIN_TELEGRAM_ID in provider variables
+npm run deploy
+```
 
-5. Deploy: `npm run deploy`.
-6. Store credentials via `npx wrangler secret put BOT_TOKEN`, `npx wrangler secret put TELEGRAM_WEBHOOK_SECRET`, `npx wrangler secret put ADMIN_DASHBOARD_PASSWORD`; add other required settings through Cloudflare secrets/variables. Do not commit real secrets.
-7. Check `https://YOUR_WORKER.workers.dev/healthz`, then [register webhooks](#register-telegram-and-sepay-webhooks).
-
-For local Worker development, copy `../.dev.vars.example` to `.dev.vars`, replace placeholders, run `npm run db:migrate:local` and `npm run dev`. Localhost is not directly reachable by Telegram or SePay.
-
-Cloudflare's `[triggers]` cron currently attempts eligible order expiration and pending notification delivery every **five minutes**. The implementation still requires operational verification on the actual deployed Worker.
+`wrangler.toml` declares a `DB` binding and a **five-minute** scheduled trigger. Check remote D1 migration success, secrets, `/healthz`, actual bot messages and scheduled logs. Do not use a copied example database UUID.
 
 ## Prepare Turso for non-Cloudflare hosts
 
-Create a database using [Turso documentation](https://docs.turso.tech/) and obtain a remote database URL and authentication token. Export them in your **local terminal**, then apply existing migrations:
+**Existing Node database integration.** Create a new, separate Turso database, store its URL/token in your private runtime secrets and apply schema migrations **manually** from the repository checkout:
 
 ```bash
-export TURSO_DATABASE_URL='libsql://YOUR_DATABASE.turso.io'
-export TURSO_AUTH_TOKEN='YOUR_PRIVATE_TOKEN'
+export TURSO_DATABASE_URL='libsql://YOUR_TEST_DB.turso.io'
+export TURSO_AUTH_TOKEN='YOUR_PRIVATE_TEST_TOKEN'
 npm run db:migrate:turso
 ```
 
-PowerShell:
-
-```powershell
-$env:TURSO_DATABASE_URL = "libsql://YOUR_DATABASE.turso.io"
-$env:TURSO_AUTH_TOKEN = "YOUR_PRIVATE_TOKEN"
-npm run db:migrate:turso
-```
-
-**Important:** The Turso migration script executes the SQL files in `migrations/` in order; it does **not** use Wrangler's D1 migration tracking table. Review the migration SQL, back up existing data and test on staging first. A hosting build does not automatically migrate the Turso database. Switching D1 → Turso does not automatically migrate existing orders, keys or sessions.
+PowerShell uses `$env:` assignments rather than `export`. **Do not assume** the app's build step automatically initializes schemas or copies Cloudflare D1 records. Read [Database compatibility and migration safety](DATABASES.md).
 
 ## Vercel + Turso
 
-1. [Import the repository into Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot).
-2. Select framework preset **Other**. Keep project root at the repository root and use a supported Node.js runtime (22+).
-3. Add all required variables (especially `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`) in **Production** environment scope. Keep payment secrets out of public previews.
-4. The checked-in `../vercel.json` rewrites `/healthz`, `/telegram/webhook`, `/sepay/webhook`, and `/admin` paths to `api/` handlers.
-5. Deploy; visit `https://YOUR_APP.vercel.app/healthz`; then [register webhooks](#register-telegram-and-sepay-webhooks).
+**Existing function integration** using `api/` and `vercel.json`.
 
-Vercel Functions have no durable local SQLite filesystem; always use Turso. Verify request execution timing and end-to-end payment behavior before onboarding users.
+1. Use the [official Vercel Deploy button](DEPLOY_BUTTONS.md) to import this repository; select **Other** if asked, and keep the repository root.
+2. Create/migrate a dedicated Turso database. Add the six core bot/admin/database variables to **private project environment variables** (production scope only for a controlled production rollout).
+3. Deploy and verify the assigned HTTPS origin and `/healthz`. Check that the Admin routes and Origin/CSRF behavior work behind Vercel's proxy.
+4. Register the **test** Telegram webhook manually; provide an external trusted scheduler for Node-only expiry/retry work.
+
+Function invocation duration and usage limits are host-specific. No live Stars/SePay provider E2E has been validated on Vercel.
 
 ## Railway + Turso
 
-1. [Create a Railway service](https://railway.com/new) from this repository.
-2. Use the included `../Dockerfile`; the container starts `node src/server.js` and binds `0.0.0.0:$PORT` (default port 3000).
-3. Set Turso, bot, admin and optional bank variables in Railway's secret/variable editor. Configure a public HTTPS domain.
-4. After preparing Turso, deploy, visit `/healthz` and [register webhooks](#register-telegram-and-sepay-webhooks).
+**Existing Docker runtime path** (`Dockerfile` and optional `.railway/railway.ts`).
 
-An optional `../.railway/railway.ts` infrastructure-as-code example is included; GitHub deployment with Dockerfile is the simpler path for first-time users. Railway credits, availability and billing depend on the account/plan.
+1. Import repository into Railway, choose Dockerfile build and expose the Node app's configured `PORT` (default 3000).
+2. Configure the six private bot/admin/Turso variables. Use **external Turso**, never the container filesystem for payments.
+3. Let Railway provide HTTPS, test `/healthz` and Admin host/proxy behavior; register test webhook deliberately.
+4. Configure a trusted scheduler and review cost/credit limits before accepting payments.
+
+A repository-specific **Railway Template Deploy badge** requires an actually published template ID; this repo does not claim one.
 
 ## Render + Turso
 
-1. [Import using the Render Blueprint](https://render.com/deploy?repo=https://github.com/ePlus-DEV/telegram-sales-bot) from `../render.yaml`.
-2. Set the prompted credentials in Render's environment/secret settings and ensure the Docker runtime is selected.
-3. Verify that the migration has already been applied to Turso, deploy, then test `/healthz` and [register webhooks](#register-telegram-and-sepay-webhooks).
+**Existing Docker Blueprint** via `render.yaml` and [official Deploy badge](DEPLOY_BUTTONS.md).
 
-**Caution:** Render Free instances may sleep when idle, making Stars pre-checkout and bank webhook timing unreliable. Do not treat a successful cold-start health check as payment readiness.
+1. Import with the Render Blueprint; check service runtime and plan.
+2. Enter all secrets requested by the wizard (including `ADMIN_DASHBOARD_PASSWORD`), and prepare/migrate external Turso.
+3. Verify HTTPS and app/DB/Admin behavior; manually register the **test** webhook.
+4. Add trusted scheduled maintenance outside the app.
+
+Free services may sleep when idle; cold wake is a serious risk for Telegram's **10-second Stars pre-checkout**. Do not treat Render Free as proven 24/7 payment hosting.
 
 ## Koyeb + Turso
 
-1. Open [Koyeb](https://app.koyeb.com/apps/new) and connect this GitHub repo.
-2. Build using `../Dockerfile`; expose the Node HTTP service on the configured `PORT`.
-3. Add Turso + bot + admin + optional bank variables; obtain a public HTTPS URL.
-4. Verify `/healthz` and [register webhooks](#register-telegram-and-sepay-webhooks).
+**Existing Dockerfile**, provider wizard setup supported.
 
-Review Koyeb's current instance quota and idle behavior before accepting real payments.
+1. Open the [Koyeb Deploy button](DEPLOY_BUTTONS.md), choose Dockerfile builder and HTTP port 3000.
+2. Supply private bot/admin/Turso variables; prepare remote Turso migrations.
+3. Verify provider HTTPS, `/healthz`, proxy/Origin checks and test Telegram webhook.
+4. Review sleep, region, resource quotas and separately configured maintenance.
+
+The repo does not ship a Koyeb-specific schedule or live provider test evidence.
 
 ## Docker / VPS / EasyPanel
 
-With Turso and all secrets stored in a private `.env` file (never committed):
+**Existing Node runtime; manual TLS and operations required.** One light-use bot can start with a **1 vCPU / 2 GB RAM recommended** Linux host; not a measured minimum. Install Docker Engine/Compose, provide a persistent remote Turso database and private secrets. Example for **local host-only testing**, not public webhook traffic:
 
 ```bash
 docker build -t telegram-sales-bot .
-docker run --rm -p 3000:3000 --env-file .env --name telegram-sales-bot telegram-sales-bot
+docker run --rm -p 127.0.0.1:3000:3000 \
+  --env-file /path/to/private/app.env \
+  telegram-sales-bot
 ```
 
-Place a TLS reverse proxy in front of port 3000 and ensure the original Host/HTTPS origin is preserved for Web Admin login CSRF protections. Arrange supervised restarts, log retention, security updates and an operator-managed scheduling process. Do **not** expose raw Docker port 3000 as a payment endpoint without HTTPS.
+For a public HTTPS bot, follow the [Oracle Compose + Caddy guide](../deploy/oracle/README.md) instead of exposing port 3000 directly. Preserve original `Host` and public HTTPS scheme for Admin CSRF/session checks; enable supervised restarts, logs, backups and five-minute maintenance.
 
 ## Oracle Cloud Always Free — lightweight single bot
 
-**Minimum practical starting configuration:** 1 ARM64 `VM.Standard.A1.Flex`, 1 OCPU, **2 GB RAM**, free-eligible boot volume (about 50 GB), Ubuntu 24.04, Docker Engine + Compose plugin, one domain/public IPv4 (80/443), one BotFather token, one Turso database. This is a **recommendation**, not a measured load-based minimum. Full requirements and required `.env`/`app.env` fields are in the [Oracle minimum requirements](../deploy/oracle/README.md#minimum-requirements-for-one-bot).
-
-
-
-For a low-resource ARM64 Ubuntu VPS, use the included [Oracle Compose bundle](../deploy/oracle/README.md): one Node container (512 MB limit), one Caddy reverse proxy (192 MB limit), external Turso, HTTPS on 80/443 and restart on reboot. It deliberately starts **one bot only**; the general [multi-bot architecture](MULTI_BOT.md) stays available for later. The operator-run maintenance script can be invoked via Docker and scheduled with host cron; see [Oracle runbook](../deploy/oracle/README.md). Verify it before accepting real payments.
+**Existing setup bundle**, not a real Oracle deployment certification. Use [`deploy/oracle/README.md`](../deploy/oracle/README.md) for **A1.Flex 1 OCPU / 2 GB recommended** sizing, Ubuntu ARM64 setup, Docker Compose+Caddy, secret files, Turso migrations, HTTPS, optional webhook registration and host cron. Free eligibility and ARM capacity are region/account dependent. **No automatic Oracle CI/CD is shipped.**
 
 ## AWS EC2 — Docker VM
 
-**Status: reuse Docker; not a native AWS one-click or verified production deployment.** One bot needs Ubuntu Linux x86_64/ARM64, external Turso and a TLS-terminating public endpoint. For a low-traffic bot, **1 vCPU / 2 GB RAM** is a practical *starting target*, not a measured minimum; `t3.small` / ARM64 `t4g.small` are possible 2 GB sizes if they are eligible for your account/credits.
+**Generic Docker reuse only** (no Terraform/CloudFormation, EC2 deploy workflow or payment E2E).
 
-1. Select an EC2 instance and AMI compatible with your account and architecture; verify [AWS EC2 Free Tier](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-free-tier-usage.html) carefully. **Accounts created on/after July 15, 2025 have a credit-based up-to-six-month plan, not a permanent free EC2 instance**. Check IPv4, EBS volume, egress and CPU credit costs, and set billing alerts.
-2. Create an SSH key pair, assign public address and DNS A record. Security Group inbound **80/443** for HTTPS and port **22 only from your IP**; never expose Node port 3000 publicly. Keep outbound HTTPS to Telegram/Turso.
-3. Install Docker Engine/Compose and Git on Ubuntu. Clone this repo and reuse the [single-bot Compose/Caddy bundle](../deploy/oracle/README.md) (its application containers do not depend on Oracle SDKs). Create ignored `.env`/`app.env`, provision **external Turso**, back up DB and apply migrations.
-4. Start the containers; confirm `https://YOUR_DOMAIN/healthz`, test a new BotFather token, then register its webhook deliberately. Enable host cron for `scripts/run-maintenance.mjs` and verify retries before any real payments.
-
-**Not provided:** EC2 launch Terraform/CloudFormation, AWS IAM policies, Route 53 configuration, SSH GitHub Actions deployment or AWS Lambda adapter. [Minimum AWS sizing/cost caveats](MINIMUM_REQUIREMENTS.md#aws-account-creation-date-matters).
+1. Choose Ubuntu x86_64/ARM64 image, SSH keys, an instance size with headroom (1 vCPU / 2 GB recommended for starting), disk and public HTTPS endpoint. Verify AWS account-plan eligibility, IPv4/EBS/egress charges and budgets **before provisioning**.
+2. Allow inbound 80/443 and SSH **only from your IP**; do not publish port 3000.
+3. Install Docker Engine/Compose and follow the [Oracle Compose instructions](../deploy/oracle/README.md) as a **generic Linux runbook**; keep external Turso, DNS, secrets and cron under your control.
+4. Verify host uptime, Caddy HTTPS, migration and webhook routing; do not enable real payments before staging tests.
 
 ## Google Compute Engine — Docker VM
 
-**Status: reuse Docker; no GCE-specific deployment workflow or real-payment validation.** Similar Ubuntu/Turso/Caddy requirements to EC2. Starting recommendation for an ordinary VM is **~2 GB RAM**, not a guaranteed floor. The [Compute Engine Free Program](https://docs.cloud.google.com/free/docs/free-cloud-features) covers up to one **`e2-micro`** eligible VM-month in **`us-west1`, `us-central1` or `us-east1`** with eligible disk/egress limits. It is about **1 GB RAM / shared CPU**, so Docker build, Caddy and webhook spikes need special testing. Larger shapes or Asia regions may charge; set billing budget/alerts.
+**Generic Docker reuse only** (no GCE-specific IaC/deploy workflow). The free-eligible `e2-micro` shape has limited/shared resources and eligible US-region restrictions; it is **not** a guaranteed 2 GB VM in Singapore. Check [Google Cloud Free Program](https://docs.cloud.google.com/free/docs/free-cloud-features) before choosing a zone.
 
-1. Create the VM with an eligible Linux image, boot disk and permitted region; inspect estimated costs and external IP charges. Allow **80/443** in VPC firewall; SSH only by authorized identity/IP.
-2. Point DNS to the public endpoint, install Docker Engine/Compose, clone the repo and reuse [the existing single-bot Compose guide](../deploy/oracle/README.md), using external Turso and separate test credentials.
-3. Verify HTTPS, schema migrations, Telegram webhook, maintenance cron, logs, quota/timeout behavior and backup/restore before payments.
-
-**Not provided:** GCE provisioning IaC, Cloud DNS/Cloud Armor config, Cloud Build/CD, or live validation. The Always Free `e2-micro` is not the same as a 2 GB VM.
+Use an Ubuntu VM, appropriate disk, public IP/DNS, VPC ingress 80/443, restricted SSH and the [generic Compose runbook](../deploy/oracle/README.md). Provide durable Turso, test webhook performance and schedule reconciliation. Larger/other regions may incur charges.
 
 ## Google Cloud Run — managed container candidate
 
-**Status: candidate only; Dockerfile exists, but no Cloud Run release workflow or provider E2E.** Cloud Run supports managed HTTPS and scale-to-zero; do **not** run the Oracle Caddy Compose stack inside Cloud Run. Start experimentally with **1 vCPU / 512 MiB** and `min instances = 0`; its CPU/memory/free billing is [usage-based](https://cloud.google.com/run/pricing), not an always-on free VPS.
+**Not a verified Cloud Run integration.** The existing Docker image can be a starting point, but there is no complete Cloud Run release config, Secret Manager setup, trusted Scheduler/Job wiring or payment E2E.
 
-1. Create a Google Cloud project with billing and budget alerts. Provision remote Turso, apply migrations outside the service and store bot/admin/Turso secrets in Secret Manager (no tokens inside images or source).
-2. Build the existing Dockerfile into a container image via an authorized build pipeline. Deploy a Cloud Run **service** with HTTPS ingress, public webhook availability, environment `PORT` matched to the container target (the Node server uses `process.env.PORT`; Dockerfile exposes **3000**), 1 vCPU/512 MiB initial resources, a small max instance count and managed secrets.
-3. Test `/healthz`, admin origin/CSRF, `/start`, webhook signature rejection, cold starts, 10-second Stars pre-checkout, replay and payment races.
-4. **Schedule reconciliation separately** via a trusted scheduled job (e.g. a Cloud Run Job invoked by Cloud Scheduler with appropriately scoped IAM). `scripts/run-maintenance.mjs` exists, but its packaged job, IAM, scheduling and retry behavior are **not implemented** in this repo. Do not expose a public unauthenticated maintenance endpoint.
-
-Do not claim Cloud Run is deploy-ready until the service config, secrets, scheduler, safe provider probes, billing and payment E2E have been verified.
+Use an external Turso database, a public HTTPS Cloud Run service with `PORT` forwarded to Node, private secrets and a small initial resource allocation; **do not deploy Caddy Compose inside Cloud Run**. A Cloud Run Job and authorized Scheduler (or equivalent) must handle expiry/outbox retries. Verify 10-second Stars pre-checkout under cold-start conditions and watch usage-based costs. The [official experimental badge](DEPLOY_BUTTONS.md#google-cloud-run-experimental) is an import shortcut only.
 
 ## Azure Virtual Machines — Docker VM
 
-**Status: reuse Docker; no Azure-specific IaC/CI.** Prefer an Ubuntu Linux VM with **~1 vCPU / 2 GB RAM** initially, external Turso and a Caddy TLS reverse proxy. Azure offers **time-limited** VM free benefits for eligible new accounts/types, not perpetual free VM capacity; additional public IP/disk/network resources may bill. Verify [Azure free benefits](https://learn.microsoft.com/en-us/training/modules/create-an-azure-account) and actual portal estimates first.
-
-Provision one VM, attach a DNS name/public IP, allow 80/443 and restrict SSH in NSG, install Docker Engine/Compose, and follow the [Oracle Compose runbook](../deploy/oracle/README.md) for the shared container stack. Use Azure Key Vault or securely ignored environment files. Keep Turso external; configure cron, backup, controlled webhook registration and full payment tests.
+**Generic Docker reuse only** (no Azure VM IaC/deploy workflow). Set up Ubuntu, external Turso, SSH, Azure NSG inbound 80/443, restricted SSH, public DNS/IP, TLS proxy and trusted cron. Reuse the [Oracle Compose instructions](../deploy/oracle/README.md). Check VM trial/credit eligibility, disk/IP/egress pricing and a billing budget first.
 
 ## Azure Container Apps — managed container candidate
 
-**Status: candidate only**; this repo has a Docker image, **not** an Azure Container Apps deployment manifest, image pipeline, secrets/ingress template, or verified E2E. An experimental Consumption-plan starting choice is **0.25 vCPU / 0.5 GiB** (minimum allocation) or **0.5 vCPU / 1 GiB** for extra headroom, one replica maximum, min replicas 0, with external Turso and managed HTTPS. [Azure's free Consumption grant](https://learn.microsoft.com/en-us/azure/container-apps/billing) is usage-limited; monitoring, image registry/network and other services may bill.
-
-Use a trusted container registry, external HTTPS ingress forwarding to Node's application port, provider-managed secrets, a pre-migrated Turso database and a controlled initial test bot. Plan authenticated scheduled maintenance separately through Container Apps Jobs or another trusted scheduler. Do not deploy Caddy as an unnecessary second container inside managed ingress; test the entire payment matrix before accepting funds.
+**Not a verified Azure Container Apps integration.** The Docker image is usable as a starting point with managed ingress, private secrets and external Turso, but no Container Apps manifest, registry pipeline, managed Job/Scheduler or real provider test is supplied. Use a small Consumption allocation for initial tests, min replicas according to latency needs and **no Caddy** inside the managed container. Configure a trusted Job for maintenance and test cold starts, authentication and payment latency before launch.
 
 ## InstaBox — temporary test environment
 
-**Status: testing candidate, not production hosting.** InstaBox provisions an isolated Linux VM with Node.js/Docker and a [public HTTPS port](https://instabox.sh/docs/ports), so the Node bot can be run there temporarily with its **existing Turso database adapter**. It is **not** a supported perpetual 24/7 service on the Free plan: current [free-plan limits](https://instabox.sh/docs/limits) are **one machine**, **4 vCPU / 8 GiB RAM**, **20 GiB persistent disk by default**, **30-minute fixed idle pause**, and **480-minute maximum run**. The plan cannot disable auto-pause. Do not count on suspended sandboxes to answer Telegram webhooks, especially Stars pre-checkout queries with a 10-second deadline.
-
-For a **non-payment test bot only**:
-
-1. Install the official CLI and create a sandbox following the [InstaBox quick start](https://instabox.sh/docs/start): `instabox login`, then `instabox create --name sales-bot-test --template agent-browser`. Use **a separate test token and test Turso database**.
-2. SSH into the sandbox, clone this repository into the persistent `/data` home/workspace, and install dependencies. Use Node 24 and run `npm run check && npm test`; configure a private environment file outside Git. Never use live payment/customer secrets in a disposable sandbox.
-3. For short-lived testing, run the Node server on port 3000 in the machine (using `PORT=3000` and a **durable remote Turso** connection), then use `instabox port publish sales-bot-test 3000` from the CLI to obtain the public HTTPS URL. Test `/healthz` before doing anything else. The exact published URL is supplied by InstaBox and must not be guessed.
-4. **Only after explicit operator intent**, use `PUBLIC_BASE_URL` with the actual public HTTPS origin to register the **test Telegram bot** webhook. Note that a bot has only one active webhook; registering a disposable URL replaces its old destination.
-5. Stop the bot experiment before the sandbox pauses. Remove or redirect the test webhook to a stable host when the experiment ends. Background maintenance/cron on paused machines will not be reliable. For production use Cloudflare Workers + D1 or an always-on VM with verified operations and E2E payment tests.
-
-**No InstaBox API credentials, machine or live deployment are included in this repository.** The sandbox can compile/run the code; it does **not** demonstrate production readiness, uptime or safe payment processing.
+**Existing test-only setup/run scripts:** [`deploy/instabox/README.md`](../deploy/instabox/README.md). InstaBox Free machines pause/expire; they cannot be relied on for continuous Telegram/SePay callback delivery or Stars pre-checkout. Use a **separate test token/database**, publish an HTTPS port only for a bounded experiment and remove the temporary webhook afterward. **Never treat this as always-on production hosting.**
 
 ## Register Telegram and SePay webhooks
 
-Deployment **does not** automatically register the Telegram webhook. In a terminal that has the same bot token and secret as the host:
+**Deploying code does not register a bot.** From a trusted local shell after the HTTPS URL is confirmed:
 
 ```bash
 export BOT_TOKEN='YOUR_TEST_BOT_TOKEN'
-export TELEGRAM_WEBHOOK_SECRET='THE_HOSTS_WEBHOOK_SECRET'
-export PUBLIC_BASE_URL='https://YOUR_PUBLIC_DOMAIN'
+export TELEGRAM_WEBHOOK_SECRET='MATCHING_TEST_SECRET'
+export PUBLIC_BASE_URL='https://YOUR_ACTUAL_HOST'
 npm run webhook:register
 ```
 
-PowerShell uses `$env:BOT_TOKEN="..."`, `$env:TELEGRAM_WEBHOOK_SECRET="..."` and `$env:PUBLIC_BASE_URL="..."`.
+This registers `https://YOUR_ACTUAL_HOST/telegram/webhook`; do **not** add the path to `PUBLIC_BASE_URL`. For `MULTI_BOTS`, use `BOT_ID=shop_a` per bot as described in [Multi-bot](MULTI_BOT.md). Each token has **one active destination**.
 
-This registers `https://YOUR_PUBLIC_DOMAIN/telegram/webhook`. In multi-bot mode, set `BOT_ID=shop_a` (and similarly for every bot) instead of global `BOT_TOKEN`; the script uses `MULTI_BOTS` and the selected bot's prefixed secrets and hostname. See [multi-bot setup](MULTI_BOT.md). **Do not include the path in `PUBLIC_BASE_URL`**. A Telegram token can point to only one active webhook destination; use different tokens for staging and production.
-
-For physical orders, set SePay's incoming-bank-transfer JSON webhook to `https://YOUR_PUBLIC_DOMAIN/sepay/webhook` using **API Key** authentication and the exact bank account configured in the app. Check [SePay's webhook documentation](https://docs.sepay.vn/tich-hop-webhooks.html) and transaction logs. A 200 response is not proof an order was matched.
+For eligible **physical** sales, configure SePay's incoming-transfer JSON webhook to `https://YOUR_ACTUAL_HOST/sepay/webhook` with **API Key** authentication and a matching bank account. A 200 response does **not** mean money settled. Digital products inside Telegram use Stars. See [Payments](PAYMENTS.md).
 
 ## Verify before real money
 
-- Check `/healthz` and hosting logs.
-- Test `/start`, `/catalog`, `/orders`, `/language`, `/admin` and unauthorized access.
-- Validate a **controlled** Stars invoice, `pre_checkout_query`, `successful_payment`, key delivery, duplicate event and failed message retry.
-- Validate authorized SePay payload, wrong account/amount, duplicate/late deposits and `/bankreviews`.
-- Confirm migration, backup/restore, cron or alternative maintenance procedure, and alerts.
-
-See the [payment matrix](PAYMENTS.md) and [operations runbook](OPERATIONS.md). The application is **not yet certified as production ready**.
-
-## Staging validation (manual only)
-
-After your staging environment is independently deployed, run the safe HTTP checks and local migration validation described in [Staging Validation](STAGING_VALIDATION.md). The dedicated GitHub Actions workflow is `workflow_dispatch` only, uses Environment `staging`, and has no deploy, Telegram registration or real-payment steps. Do not claim provider verification before a staging workflow actually passes against that provider.
+Run [non-destructive staging checks](STAGING_VALIDATION.md), validate provider auth and replay rejection, real recovery/notification behavior, DB backup/restore, Admin CSRF and all relevant Stars/SePay test cases. A passing CI job or `/healthz` is insufficient. Follow [Operations](OPERATIONS.md) and [P0 release gates](../ROADMAP.md#p0--release-blockers-deferred-execution-required-for-launch).

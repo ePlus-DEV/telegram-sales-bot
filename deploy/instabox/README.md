@@ -1,6 +1,6 @@
 # InstaBox — temporary deployment for one TEST Telegram Sales Bot
 
-[← Main README](../../README.md) · [Generic deployment](../../docs/DEPLOYMENT.md) · [Configuration](../../docs/CONFIGURATION.md) · [Operations](../../docs/OPERATIONS.md)
+[← Documentation](../../docs/README.md) · [Generic deployment](../../docs/DEPLOYMENT.md) · [Configuration](../../docs/CONFIGURATION.md) · [Databases](../../docs/DATABASES.md) · [Operations](../../docs/OPERATIONS.md)
 
 **Status: setup/build/deploy scripts included, not deployed or provider-E2E verified.** This bundle runs **one test bot only** on an InstaBox machine using Node 24 Docker and external durable **test Turso/libSQL**. InstaBox provides the public HTTPS port; **no Caddy, database daemon, Redis or second VM** required.
 
@@ -11,7 +11,7 @@
 - An InstaBox account and CLI on your **local computer**. Official quick start: <https://instabox.sh/docs/start>.
 - A new **test** Telegram token from [@BotFather](https://t.me/BotFather), random Telegram webhook secret, numeric admin ID and strong dashboard password.
 - A new **test Turso** DB URL and auth token (persistent outside InstaBox), with zero production orders/keys.
-- This repo's `deploy/instabox/` scripts **must exist in the checked-out git ref**. They are usable on `main` *after the PR is merged*; before merge use the PR branch via the manual setup option noted below.
+- The current repository includes `deploy/instabox/setup.sh`, `run.sh`, `compose.yaml` and a **safe placeholder** environment file. The setup script clones `main`; review the scripts on the version you intend to deploy.
 
 ## 2. Create and provision a machine
 
@@ -29,7 +29,7 @@ instabox create --name sales-bot-test --template agent-browser \
   --setup-file deploy/instabox/setup.sh --wait-setup
 ```
 
-This official `--setup-file` mechanism runs the supplied provisioning script **in the machine**. The script clones **main** into persistent `/data/home/telegram-sales-bot`, checks Docker Compose, creates a private placeholder `app.env`, and builds the image. It **does not** start the bot, publish a port, write database tables, or call Telegram. **Wait until PR merge**, otherwise the remote `main` lacks these deployment assets and the setup will intentionally stop. For PR review, use manual SSH checkout of the feature branch.
+This official `--setup-file` mechanism runs the supplied provisioning script **in the machine**. The script clones **main** into persistent `/data/home/telegram-sales-bot`, checks Docker Compose, creates a private placeholder `app.env`, and builds the image. It **does not** start the bot, publish a port, write database tables, or call Telegram. If deploying a fork or an unmerged feature branch, change the setup ref explicitly and inspect the code before running it; the default clones `main`.
 
 Check the machine's setup status with `instabox get sales-bot-test --json` if needed. Free plans typically allow **one machine**; do not create duplicate boxes.
 
@@ -118,6 +118,6 @@ instabox suspend sales-bot-test
 
 Remove/redirect the **test** webhook after testing. Do not leave an active webhook pointing at a suspended instance. The sandbox's auto-pause also interrupts any in-VM cron; **the existing Cloudflare Worker 5-minute schedule does not automatically apply to Docker**. For an always-on paid bot, choose [Cloudflare Workers + D1](../../docs/DEPLOYMENT.md#cloudflare-workers--d1) or a properly managed VM and validate provider event E2E.
 
-## Pre-merge tests
+## Offline verification
 
 The GitHub PR CI validates Bash syntax and a non-secret `docker compose config --quiet` using the example environment, besides the existing Node tests and Docker build. **No live InstaBox machine, token, provider webhook or payment test is invoked by CI.**

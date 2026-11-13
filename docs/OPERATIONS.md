@@ -1,76 +1,83 @@
 # Operations, backups and incident response
 
-[← Docs](README.md) · [Deployment](DEPLOYMENT.md) · [Payments](PAYMENTS.md) · [Roadmap](../ROADMAP.md)
+[← Documentation](README.md) · [Configuration](CONFIGURATION.md) · [Payments](PAYMENTS.md) · [Staging validation](STAGING_VALIDATION.md)
 
-**Operating level:** early MVP, not a fully managed payment service. The operator is responsible for uptime, credentials, bank reconciliation, recovery, customer communication and business compliance.
+**Operating status:** early MVP, **not** a production-certified payment service. The operator owns uptime, billing, authentication, bank reconciliation, backups, incident response and customer communication. Automated CI is **not** a production deploy pipeline.
 
-## Daily operating checklist
+## Daily checklist
 
-- Check `GET /healthz` and **real** bot replies (`/start` / `/catalog`), not just HTTP success.
-- Inspect hosting error logs for Telegram/SePay webhook failures; no raw credentials or customer key material in logs.
-- Review orders stuck in PAID/undelivered status and any `notification_outbox` pending records.
-- Use `/bankreviews` for late, mismatched and unexpected credits. Do not infer that a bank transfer was refunded just because it was acknowledged.
-- Use `/refundreviews` for uncertain Stars refunds, and confirm with Telegram before manual intervention.
-- Check D1/Turso quotas, free-tier limitations and account billing.
+- Check provider status, HTTPS `/healthz` and a **real test bot message**; a health HTTP 200 is insufficient.
+- Inspect Telegram/SePay webhook errors and missing updates; **never log raw tokens, keys or payment credentials**.
+- Review **PAID but undelivered** orders and `notification_outbox` pending entries.
+- Run `/bankreviews` for unknown/wrong/late SePay transfers; an acknowledgement does **not** refund money.
+- Run `/refundreviews` for uncertain Stars refund states; verify with Telegram before taking another action.
+- Check database health, quotas, backup age, billing alerts and renewal/host expiration.
 
-## Scheduling by hosting type
+## Scheduling and retries
 
-| Hosting | Existing implementation | Operator action |
+| Host | Existing capability | Operator action |
 | --- | --- | --- |
-| Cloudflare Workers | `[triggers]` every five minutes | Confirm scheduled runs/errors in deployed Worker logs |
-| Vercel, Railway, Render, Koyeb, Docker | No automatic scheduled daemon in the app | Authorized admin may run `/expireorders` and `/retryalerts`; trusted scheduling is future work |
+| **Cloudflare Workers** | `wrangler.toml` `[triggers]` every **5 minutes** | Verify scheduled job/logs and actual recovery on the deployed Worker |
+| **Oracle Docker Compose** | `scripts/run-maintenance.mjs` and a **host cron example** | Install/enable host cron, verify successful jobs and logs |
+| **Other single-bot Node/Docker VPS** | Same **on-demand** Node maintenance script | Supply a trusted supervisor/cron; do not expose an unauthenticated HTTP maintenance endpoint |
+| **Vercel/Railway/Render/Koyeb** | No automatic scheduler configured by this repository | Implement a trusted provider job/schedule, or operate admin recovery commands manually while testing |
+| **Google Cloud Run/Azure Container Apps** | Candidate container runtime only | Build and secure a separate scheduled Job; no completed recipe in repo |
+| **InstaBox Free** | On-demand test bot only; machine may suspend | Never depend on cron or prompt payment processing during suspension |
 
-`/expireorders` only expires **eligible unapproved** orders. Never release stock on a previously approved Stars checkout without reconciliation.
+**Multi-bot Node caveat:** `scripts/run-maintenance.mjs` rejects `MULTI_BOTS`; it cannot serve as a multi-tenant job. Implement/test tenant-aware scheduling first; see [Multi-bot](MULTI_BOT.md).
 
-## Database backup — Cloudflare D1
-
-Before migrations and at an appropriate regular cadence, export the full **remote** database to a **private location** (contains plaintext digital keys, user IDs, orders and possibly bank records):
+On a **running Oracle Compose** host (working directory `deploy/oracle`), operator-run maintenance is:
 
 ```bash
-npx wrangler d1 export eplus-telegram-sales-bot --remote --output=./private-staging-backup.sql
+docker compose exec -T bot node scripts/run-maintenance.mjs
 ```
 
-This syntax is documented by [Cloudflare D1 export](https://developers.cloudflare.com/d1/wrangler-commands/). The example filename is illustrative; store real backups encrypted with restricted access, never in GitHub or the project folder you push. Cloudflare documents importing a SQL export using `wrangler d1 execute --file`; **practice restore into an isolated test database first**, never over live production data without an approved recovery plan.
+The [Oracle runbook](../deploy/oracle/README.md) includes a sample **five-minute host crontab**. Run this only after confirming it targets the correct bot/database. For emergency manual operation, the authorized Telegram admin can use `/expireorders` and `/retryalerts`. **Never expire a previously approved Stars pre-checkout** based only on elapsed time.
 
-Check backup integrity, record its date and retention, and verify restoration including relations among `orders`, `digital_inventory`, payment-event records, notification outbox and locale/admin tables.
+Notification delivery is **at least once**; Telegram lacks a send-message idempotency key, so crashes can result in duplicate **messages**. Duplicate messages are **not** proof of duplicate charges; inspect payment ledger records.
 
-## Database backup — Turso
+## Database backups and restore
 
-Follow [Turso's official backup/restore guidance](https://docs.turso.tech/) for the database's current storage engine and plan. Export/snapshot to a **private, encrypted location**; test restoring to a separate staging database and verify schema/migrations 0001–0006.
+**D1:** export the **remote** target database to a **private** location before a migration and regularly afterward:
 
-Do not assume D1 exports can be copied directly into a live Turso database, or vice versa, without schema/data validation. **Switching hosting does not migrate data automatically.**
+```bash
+npx wrangler d1 export eplus-telegram-sales-bot --remote --output=./private-test-backup.sql
+```
 
-## Migration / release safety
+This is an example filename. Real exports contain plaintext inventory keys, orders, user IDs and potentially payment information. Keep them **outside any pushed repository**, encrypted and access-restricted. See [Cloudflare's D1 export command](https://developers.cloudflare.com/d1/wrangler-commands/).
 
-1. Review changes and CI. Confirm if SQL migrations are required.
-2. Back up **the specific target** database (production and staging may be different).
-3. Test migrations and application logic against a separate staging copy.
-4. Apply migrations to the target using `npm run db:migrate` (D1 remote) or `npm run db:migrate:turso` (remote Turso). Never edit/drop production order tables manually.
-5. Deploy the code, verify startup/health and real Telegram webhook delivery.
-6. Test critical payment flows with a controlled environment. Watch for new outbox retries, unexpected bank reviews and paid-but-undelivered orders.
-7. Document schema/data rollback and restoration options. **Reverting code does not reverse database migrations.**
+**Turso/libSQL:** use the database provider's current backup/export and restore mechanisms (see [Turso documentation](https://docs.turso.tech/)). **Do not assume** a D1 export can be imported directly into an existing live Turso DB without transformation/verification. Migrating hosts does **not** move customer data automatically.
 
-No production deploy or migrations are performed automatically by the GitHub CI workflow.
+**Restore drill:** restore to a completely separate **staging** database, validate migrations and relationships among `orders`, `payment_events`, digital inventory, admin sessions, refunds and notification outbox. Reconcile counts and payment state before changing webhook routing. Record last successful backup, recovery owner and retention location without recording secrets.
 
-## Incident response
+## Safe release procedure
 
-| Symptom | Immediate safe action |
+1. Review the PR, test results and any **forward-only** schema migrations.
+2. Take and verify a private backup of the **exact target database**.
+3. Test changes against an independent staging bot/database; never run production migrations from a PR build.
+4. Apply reviewed migrations for that provider (`npm run db:migrate` for D1; `npm run db:migrate:turso` for remote Turso) **before enabling code that needs them**.
+5. Deploy the code using the host runbook. Verify HTTPS, database connectivity, admin auth/CSRF, webhook rejection and actual test bot messages.
+6. Verify expiry/outbox scheduler, notification recovery and provider quotas/billing after deployment.
+7. Keep rollback instructions. **Reverting code does not undo a database schema migration**. Use a tested restore procedure if data recovery is required.
+
+**No automatic production migration, bot webhook registration or live payment deploy occurs in the repository's PR CI.**
+
+## Incident playbook
+
+| Symptom | First safe actions |
 | --- | --- |
-| Bot stops answering | Check host uptime, provider quotas, `BOT_TOKEN`, registered webhook URL, secret header, platform logs |
-| Paid order, no key message | Inspect payment ledger/order and outbox; run `/retryalerts`; buyer can try `/mykey ORDER_ID`; do **not** create another delivery record |
-| Unknown/late/wrong SePay transfer | Review `/bankreviews`, verify against provider/bank statement, communicate with payer; do not assign to another order automatically |
-| Uncertain Stars refund | Open `/refundreviews`; verify result at Telegram before **any** further API call |
-| Admin session/login trouble | Confirm HTTPS, host/origin forwarding, Secure cookie, `ADMIN_DASHBOARD_PASSWORD`, schema `0005` |
-| Missing locale table | Ensure migration `0006` applied to the actual D1/Turso database |
-| Staging accidentally receives production bot events | Restore **one bot token = one webhook URL** routing; use distinct test bot and production bot |
-| Exposed token/secret | Rotate it immediately in provider, host settings and webhook; review logs and audit events; invalidate sessions where appropriate |
+| Bot silent | Check host sleep/uptime, quota, public DNS/HTTPS, BotFather token, **single active webhook**, secret header, logs |
+| Paid order, key missing | Inspect order/event/outbox and `/mykey ORDER_ID`; use `/retryalerts` only for a missing message; **never mint/deliver a second key blindly** |
+| Unknown or late bank transfer | Review `/bankreviews`, bank statement and SePay transaction; do not auto-credit another order |
+| Stars refund status unknown | Review `/refundreviews` and original charge in Telegram; **do not retry uncertain `refundStarPayment` automatically** |
+| Admin login fails | Check HTTPS scheme, Host / `X-Forwarded-Proto`, session DB, password/CSRF and migration 0005 |
+| Language settings missing | Confirm locale migration 0006 on the **actual** DB |
+| Preview stole live webhook | Restore correct production webhook intentionally; keep distinct test and prod bot tokens |
+| Database becomes unavailable | Preserve logs/backup; do not switch to ephemeral SQLite or replay unknown settlements |
+| Credentials exposed | Rotate at provider, re-register webhook secret/token as needed, inspect logs/audit records and invalidate sessions appropriately |
 
-## Monitoring gaps and future work
+## Monitoring gaps and evidence
 
-Current MVP has health endpoint, database-backed notification retry and basic operational commands. It does **not** yet include complete paid-order alerts, automated reconciliation of approved-but-abandoned Stars checkouts, trusted non-Cloudflare scheduling, backup automation, full audit dashboards or SLO/uptime reporting.
+The app does **not** yet provide comprehensive SLO dashboards, automatic database backups, guaranteed non-Cloudflare scheduling, full approved-but-abandoned Stars reconciliation or accounting-grade reporting. See [Roadmap P0](../ROADMAP.md#p0--release-blockers-deferred-execution-required-for-launch).
 
-See [P0 release gates](../ROADMAP.md) and the [Security Policy](../SECURITY.md). Do not claim production certification until the recovery drill and provider end-to-end tests have passed.
-
-## Safe staging smoke and release evidence
-
-Use the [Staging Validation checklist](STAGING_VALIDATION.md) to check migration schemas, webhook authentication rejection and Admin login/CSRF behavior. A protected workflow is manual-only and must be pointed at an explicitly staging-named HTTPS host. Keep the run link and separate payment E2E evidence; do not interpret green CI or an HTTP health check as proof of successful settlement.
+Keep separate evidence for (1) offline CI, (2) authenticated remote staging checks and (3) **supervised provider payment E2E**. See [Staging validation](STAGING_VALIDATION.md). Passing (1) or (2) never substitutes for (3).
