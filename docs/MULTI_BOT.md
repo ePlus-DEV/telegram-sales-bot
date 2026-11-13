@@ -1,6 +1,6 @@
 # Multi-bot deployment — independent Telegram storefronts
 
-[← Configuration](CONFIGURATION.md) · [Deployment](DEPLOYMENT.md) · [Web Admin](ADMIN.md)
+[← Documentation](README.md) · [Configuration](CONFIGURATION.md) · [Deployment](DEPLOYMENT.md) · [Databases](DATABASES.md) · [Web Admin](ADMIN.md)
 
 One running application can serve **multiple Telegram bots**, each with its own catalog, customers, orders, payment events, inventory, locale preferences, notification queue, admin sessions, payment credentials and Web Admin. **Isolation is achieved with a separate durable database per bot**, not a shared database with unscoped records.
 
@@ -96,7 +96,7 @@ If using SePay for **eligible physical sales**, configure separate webhook desti
 
 Each dashboard authenticates against that bot's own credentials and session database; products, keys and financial order records never cross the tenant boundary. Accounts and sessions are not shared. Currently bots are provisioned through hosting configuration, **not** created by clicking an Add Bot button in the Web Admin. Runtime changes to the list require a configuration redeploy/restart.
 
-Smoke-test authorization on each hostname: correct webhook secret, wrong bot's webhook secret (must return 401), unknown hostname (404), no cross-bot catalog or order access, SePay credential mismatch and independent Web Admin login. Also confirm the cron or host-specific maintenance process.
+Smoke-test authorization on each hostname: correct webhook secret, wrong bot's webhook secret (must return 401), unknown hostname (404), no cross-bot catalog or order access, SePay credential mismatch and independent Web Admin login. Also confirm the cron or host-specific maintenance process. **Important:** `scripts/run-maintenance.mjs` is intentionally **single-bot only** and rejects `MULTI_BOTS`; it is **not** a verified Node multi-bot scheduler. Cloudflare's scheduled handler supports per-tenant processing. On Node hosts, implement and test a tenant-aware trusted scheduler before claiming unattended multi-bot operations.
 
 ## Operational and safety notes
 
