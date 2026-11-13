@@ -1,8 +1,8 @@
 # Web Admin — features and operating guide
 
-[← Documentation](README.md) · [Commands](COMMANDS.md) · [Roadmap](../ROADMAP.md)
+[← Documentation](README.md) · [Commands](COMMANDS.md) · [Configuration](CONFIGURATION.md) · [Operations](OPERATIONS.md) · [Roadmap](../ROADMAP.md)
 
-This guide describes the **current code**, not a production-verified deployment. Set a strong `ADMIN_DASHBOARD_PASSWORD`, apply migrations 0001–0006, use HTTPS and open `https://YOUR_HOST/admin`. The dashboard uses server-side sessions, CSRF tokens and an Origin check; no client-side JavaScript is needed.
+This page is the **canonical feature reference for the Web Admin in current code**, not a production-verified deployment. Set a strong `ADMIN_DASHBOARD_PASSWORD`, apply migrations 0001–0006, use HTTPS and open `https://YOUR_HOST/admin`. The dashboard uses server-side sessions, CSRF tokens and an Origin check; no client-side JavaScript is needed.
 
 ## Navigation
 
@@ -48,4 +48,4 @@ These figures are **not accounting revenue, merchant balances or settlement conf
 - Search and page size are bounded; bulk inventory is intentionally limited.
 - SSO/RBAC, physical warehouse management, complete shipping lifecycle, encryption/rotation, advanced analytics and full refund disputes remain **unimplemented** and are tracked in [Roadmap](../ROADMAP.md) / [issue #6](https://github.com/ePlus-DEV/telegram-sales-bot/issues/6).
 
-Automated tests validate these flows on disposable SQLite mocks. Live staging and provider payment tests are intentionally deferred during the feature-completion phase.
+Automated tests validate these flows on disposable SQLite mocks; **that does not add a SQLite production runtime adapter**. Remote staging and live-provider payment tests remain separate release gates. See [Databases](DATABASES.md) and [Staging validation](STAGING_VALIDATION.md).
