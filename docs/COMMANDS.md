@@ -1,6 +1,6 @@
 # Telegram commands and Web Admin
 
-[← Docs](README.md) · [Getting started](GETTING_STARTED.md) · [Payments](PAYMENTS.md)
+[← Documentation](README.md) · [Getting started](GETTING_STARTED.md) · [Web Admin](ADMIN.md) · [Payments](PAYMENTS.md)
 
 **Telegram bot commands** work in private chat. The separate web dashboard lives at **`https://YOUR_HOST.example/admin`** and requires `ADMIN_DASHBOARD_PASSWORD`. These are two different admin interfaces.
 
@@ -52,8 +52,8 @@ Use **real order IDs only** when operating a test shop. Do not run a refund comm
 | Reconciliation | Acknowledge bank reviews; see unresolved Stars refunds without reissuing the refund API |
 | Audit | Review recent mutation metadata; values of inventory keys are never displayed |
 
-Login uses an eight-hour server-side session with Secure/HttpOnly/SameSite=Strict cookies, Origin/CSRF checks and throttled password attempts. The interface supports Vietnamese/English. **No SSO, RBAC, export, bulk import, full dashboard analytics or refund action is available yet.**
+Login uses an eight-hour server-side session with Secure/HttpOnly/SameSite=Strict cookies, Origin/CSRF checks and throttled password attempts. The interface supports Vietnamese/English. **No SSO or RBAC** is available. The UI **does** support a bounded bulk key import and **aggregate inventory CSV** (not raw key export); it does **not** implement complete accounting or an automatic bank refund. Stars refund review and the restricted `/refundstars` command are separate from an unrestricted Web Admin refund workflow.
 
 Read [Security](../SECURITY.md) before exposing the dashboard to external users.
 
-See the [Web Admin guide](ADMIN.md) for search, filters, bulk import rules, safe CSV export and financial-metric caveats.
+See the [Web Admin guide](ADMIN.md) for search, filters, bulk import rules, safe CSV export and recorded-payment (not accounting) caveats.
