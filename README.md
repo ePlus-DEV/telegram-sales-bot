@@ -39,6 +39,7 @@ The current implementation is **not** a hosted store or a production guarantee. 
 | **Google Cloud Run** | Managed Node container | **Turso** | [Container candidate; not E2E tested](docs/DEPLOYMENT.md#google-cloud-run--managed-container-candidate) |
 | **Azure VM** | Ubuntu + Docker | **Turso** | [Manual VM deployment](docs/DEPLOYMENT.md#azure-virtual-machines--docker-vm) |
 | **Azure Container Apps** | Managed container | **Turso** | [Container candidate; not E2E tested](docs/DEPLOYMENT.md#azure-container-apps--managed-container-candidate) |
+| **InstaBox (Free sandbox)** | Linux machine + Node.js/Docker | **Turso** | [Temporary test deployment, not 24/7](docs/DEPLOYMENT.md#instabox--temporary-test-environment) |
 
 **Recommendation for testing:** Cloudflare Workers + D1 avoids an always-running server and a second database provider. Free plans have quotas; cold starts or quota exhaustion on other platforms can delay payment callbacks. Deployment configurations exist, but **no provider is claimed to have passed a live end-to-end deployment test**.
 
