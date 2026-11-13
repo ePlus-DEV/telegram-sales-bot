@@ -1,51 +1,52 @@
-# Getting started — first test bot
+# Getting started — your first test bot
 
-[← README](../README.md) · [Tiếng Việt](GETTING_STARTED.vi.md) · [Deployment options](DEPLOYMENT.md) · [Provider minimums](MINIMUM_REQUIREMENTS.md)
+[← Documentation](README.md) · [Tiếng Việt](GETTING_STARTED.vi.md) · [Configuration](CONFIGURATION.md) · [Deployment options](DEPLOYMENT.md)
 
-This guide is for a **new test shop**, not a migration of an existing production database. A Telegram bot token is a secret; do not post it in issues, PRs or screenshots.
+This guide gets **one disposable test bot** responding. It is **not a production deployment guide** and does not authorize charging customers. For multi-bot, see [Multi-bot](MULTI_BOT.md).
 
-## Prerequisites
+## 1. Prerequisites
 
-- Node.js **22 or newer** (24 recommended), Git, terminal access.
-- A new **test Telegram bot** created through [@BotFather](https://t.me/BotFather); record its token privately.
-- For easiest serverless setup: a Cloudflare account with Workers and D1 access. AWS/GCP/Azure VM deployments can reuse generic Docker; managed Cloud Run and Azure Container Apps are unverified candidates. Compare their resource constraints and free-tier eligibility in [provider minimums](MINIMUM_REQUIREMENTS.md).
-- Optional physical payments: a bank account with a supported VietQR BIN and a SePay account configured for authenticated webhooks.
-- A unique randomly generated `ADMIN_DASHBOARD_PASSWORD` (32+ characters recommended), plus your numeric `ADMIN_TELEGRAM_ID`.
+You need **Node.js 22+ (24 recommended)**, Git, a terminal, a **new test bot token** from [@BotFather](https://t.me/BotFather), your numeric Telegram admin ID and a randomly generated dashboard password of at least 16 characters (32+ recommended). Keep all credentials private.
 
-## 1. Get the application
+Choose one database/runtime:
+
+| Route | Database | Suitable for |
+| --- | --- | --- |
+| **Cloudflare Workers** | Cloudflare **D1** | Easiest serverless first test; no VPS |
+| **Node/Docker/Vercel** | Remote **Turso/libSQL** | Reusing the source on another host |
+
+**No PostgreSQL, Neon/Supabase or local SQLite adapter is shipped today.** See [database compatibility](DATABASES.md). Each environment needs an independent test database; never test against live orders or customer keys.
+
+## 2. Download and validate source
 
 ```bash
 git clone https://github.com/ePlus-DEV/telegram-sales-bot.git
 cd telegram-sales-bot
 npm install
 npm run check
+npm run staging:check-migrations
 npm test
 npm run docs:check
 ```
 
-## 2. Choose the database/runtime
+These are **offline checks**. They do not create a hosting account, deploy the bot, migrate a remote database or register a Telegram webhook.
 
-**Cloudflare (recommended for a first test)**
+## 3. Create your database and deploy
+
+### Option A — Cloudflare Workers + D1
 
 ```bash
 npx wrangler login
 npx wrangler d1 create eplus-telegram-sales-bot
 ```
 
-Copy the returned D1 UUID into `wrangler.toml` under `database_id`, replacing `REPLACE_WITH_YOUR_D1_DATABASE_ID`.
+Copy the **returned D1 database UUID** into the `database_id` placeholder in `wrangler.toml`; keep the binding named `DB`. Review the target, then apply all migrations **0001–0006** to this **remote test database**:
 
 ```bash
 npm run db:migrate
-npm run deploy
 ```
 
-The migration command applies the schema in `migrations/0001_*.sql` through `0006_*.sql` to the **remote D1 database**. On a local-only development database, use `npm run db:migrate:local` instead.
-
-**Other platforms:** Vercel, Railway, Render, Koyeb and Docker use an external **Turso** database. Follow [Deployment](DEPLOYMENT.md) and then the [configuration table](CONFIGURATION.md). Do **not** rely on container/serverless local SQLite for paid orders.
-
-## 3. Configure your hosting secrets
-
-For Cloudflare, set at least:
+Store the required secrets using the provider's private secret store:
 
 ```bash
 npx wrangler secret put BOT_TOKEN
@@ -53,52 +54,71 @@ npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put ADMIN_DASHBOARD_PASSWORD
 ```
 
-Also configure `ADMIN_TELEGRAM_ID` via the Cloudflare dashboard or `[vars]` in `wrangler.toml`. If you enable physical orders, configure `SEPAY_WEBHOOK_API_KEY`, `BANK_BIN`, `BANK_ACCOUNT_NO`, and `BANK_ACCOUNT_NAME`. See [Configuration](CONFIGURATION.md) for required/optional settings; do not commit secrets to `wrangler.toml`.
+Set `ADMIN_TELEGRAM_ID` in the provider's private environment/variable settings. For eligible **physical** sales only, add bank/SePay settings from [Configuration](CONFIGURATION.md). Then deploy:
 
-The admin page will return **503** if the dashboard password is unset or too short; this is deliberate.
+```bash
+npm run deploy
+```
 
-## 4. Register the Telegram webhook
+Open the actual `https://YOUR_WORKER.workers.dev/healthz` URL.
 
-After deployment, use the actual **public HTTPS base URL**, and run the webhook-registration script **from your terminal**, not through CI or a public browser:
+### Option B — Node.js/Docker + Turso
+
+Provision **a new test Turso database** and obtain its remote TLS URL and token. Apply the schema **only after checking the target is empty and isolated**:
+
+```bash
+export TURSO_DATABASE_URL='libsql://YOUR_TEST_DB.turso.io'
+export TURSO_AUTH_TOKEN='YOUR_PRIVATE_TEST_TOKEN'
+npm run db:migrate:turso
+```
+
+On Windows PowerShell, use `$env:TURSO_DATABASE_URL="..."` and `$env:TURSO_AUTH_TOKEN="..."` rather than POSIX `export`.
+
+Next choose your host in [Deployment](DEPLOYMENT.md) or a [Deploy badge](DEPLOY_BUTTONS.md), set the **same** Turso URL/token plus four bot/admin variables in provider secrets and deploy the Dockerfile/Node app. For a VM, use the [Oracle Compose guide](../deploy/oracle/README.md), adaptable to other Linux VMs. The server listens on `PORT` (default `3000`); terminate TLS at the provider/proxy and never expose raw HTTP port 3000 to the public internet.
+
+The Docker image **does not run migrations automatically**. The Node scheduler also needs [explicit operation](OPERATIONS.md#scheduling-and-retries).
+
+## 4. Register the Telegram webhook (manual and deliberate)
+
+After public HTTPS is healthy, use the **real origin** (do not append `/telegram/webhook`):
 
 ```bash
 export BOT_TOKEN='YOUR_TEST_BOT_TOKEN'
 export TELEGRAM_WEBHOOK_SECRET='SAME_SECRET_AS_HOST'
-export PUBLIC_BASE_URL='https://YOUR_HOST.example'
+export PUBLIC_BASE_URL='https://YOUR_ACTUAL_HOST'
 npm run webhook:register
 ```
 
-**Windows PowerShell**
+**PowerShell:**
 
 ```powershell
 $env:BOT_TOKEN = "YOUR_TEST_BOT_TOKEN"
 $env:TELEGRAM_WEBHOOK_SECRET = "SAME_SECRET_AS_HOST"
-$env:PUBLIC_BASE_URL = "https://YOUR_HOST.example"
+$env:PUBLIC_BASE_URL = "https://YOUR_ACTUAL_HOST"
 npm run webhook:register
 ```
 
-The script calls Telegram `setWebhook` for `/telegram/webhook` with a secret-token header. **One bot token supports one active Telegram webhook URL.** Use a different bot for staging versus production; avoid changing live webhook routing by accident.
+This calls Telegram `setWebhook`. **Each bot token has only one active webhook endpoint.** Never register a production bot against an unstable preview or temporary sandbox.
 
-## 5. Smoke test before touching payments
+## 5. Verify safely
 
-1. Open `https://YOUR_HOST.example/healthz`. HTTP 200 proves the HTTP handler responded, **not** that a payment or database migration succeeded.
-2. Message your test bot with `/start`, `/language`, then `/catalog`.
-3. Open `https://YOUR_HOST.example/admin`, sign in using your dashboard password, create a **test digital** product and add a **non-sensitive test key**.
-4. Re-run `/catalog`, verify the product is listed. Test a controlled Stars invoice flow only in a safe test environment and according to Telegram's current payment guidance.
-5. If physical transfers are enabled, configure SePay's incoming-transfer JSON webhook to `https://YOUR_HOST.example/sepay/webhook`, matching the bank account and API key. Validate a controlled transaction and the paid-order notification.
-6. Verify `/orders`, `/mykey ORDER_ID`, failure/duplicate notifications, and that unauthorized users cannot access `/admin`.
+1. Visit `/healthz` (only proves HTTP response, **not DB/payment readiness**).
+2. Send `/start`, `/language` and `/catalog` to the **test bot**.
+3. Sign in to `https://YOUR_ACTUAL_HOST/admin`; create a sample product and use **non-sensitive dummy keys**.
+4. Check `orders`, unauthorized webhooks and unauthorized Admin access.
+5. If testing eligible physical goods, separately configure and validate SePay's authenticated `/sepay/webhook` against **test** bank/provider credentials; never use real payments as a first smoke test.
+6. Verify scheduled expiry/outbox retries, logs and data persistence as relevant to your host.
 
-For a full test matrix, see [Payments](PAYMENTS.md) and [Operations](OPERATIONS.md). Do not put live customer balances or real high-value keys in staging.
+The complete [staging test matrix](STAGING_VALIDATION.md), [payment safeguards](PAYMENTS.md) and [release blockers](../ROADMAP.md#p0--release-blockers-deferred-execution-required-for-launch) remain required before customer payments.
 
-## Troubleshooting shortcuts
+## Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
-| `/healthz` works but bot is silent | Registered webhook URL, `BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and platform logs |
-| Database/table not found | D1 UUID or Turso connection; run **all migrations** against the deployed database |
-| Admin returns HTTP 503 | `ADMIN_DASHBOARD_PASSWORD` is absent or shorter than 16 characters |
-| Admin sign-in fails behind proxy | Use the public HTTPS domain; inspect Host/proxy configuration and cookie/Origin behavior |
-| SePay deposit not credited | Compare account/amount/order memo, check `/bankreviews`, then reconcile manually |
-| Stars key not delivered | Check order, `/retryalerts`, `/mykey ORDER_ID` and the payment event; never blindly re-issue a key |
+| HTTP OK, bot silent | BotFather token, `setWebhook` destination, Telegram webhook secret, provider logs |
+| `no such table` | Correct database UUID/Turso URL and all migrations; don't run writes against the wrong target |
+| Admin HTTP 503 | Missing/too-short `ADMIN_DASHBOARD_PASSWORD` |
+| Admin sign-in fails | Public HTTPS origin, proxy Host / `X-Forwarded-Proto`, cookies and CSRF |
+| Missing digital key after payment | Ledger/outbox, `/mykey ORDER_ID`, operator review; never duplicate delivery blindly |
 
-Further troubleshooting: [Operations](OPERATIONS.md).
+[Operating runbook](OPERATIONS.md) · [Complete documentation](README.md)
