@@ -3,6 +3,7 @@ import { createPurchase, recoverInvoice, approvePrecheckout } from './purchase.j
 import { enqueueNotification, flushNotifications } from './notifications.js';
 import { expirePendingOrders, recordBankReview, listBankReviews, acknowledgeBankReview, listRefundReviews, refundPaidStars } from './reconciliation.js';
 import { handleAdminRequest } from './admin/handler.js';
+import { selectBotEnvironment, allBotEnvironments } from './multi-bot.js';
 import {t,money,languageFor,languageForId,setLanguage,statusLabel} from './i18n.js';
 
 function json(value, status = 200) {
@@ -307,16 +308,34 @@ async function sepayWebhook(env, body) {
 }
 export default {
   async scheduled(_controller,env,ctx) {
-    ctx.waitUntil((async () => {
-      await expirePendingOrders(env,{limit:100});
-      await flushNotifications(env,send,{limit:40});
+    let bots;
+    try { bots = allBotEnvironments(env); }
+    catch {
+      console.error('Scheduled reconciliation: multi-bot configuration invalid');
+      return;
+    }
+    // Every bot owns a different database; a failure must not skip other bots.
+    for (const bot of bots) ctx.waitUntil((async () => {
+      await expirePendingOrders(bot,{limit:100});
+      await flushNotifications(bot,send,{limit:40});
     })().catch(error => {
       console.error('Scheduled reconciliation failed:',error.message);
       throw error;
     }));
   },
   async fetch(request, env, ctx) {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    try {
+      const scoped = selectBotEnvironment(env,url.hostname);
+      if (!scoped) return json({ error:'not found' },404);
+      if (scoped !== env && (!scoped.DB || typeof scoped.DB.prepare !== 'function'))
+        return json({ error:'bot database unavailable' },503);
+      env = scoped;
+    } catch {
+      console.error('Multi-bot configuration invalid');
+      return json({ error:'configuration error' },503);
+    }
+    const path = url.pathname;
     if (path === '/admin' || path.startsWith('/admin/')) return handleAdminRequest(request,env);
     if (request.method === 'GET' && path === '/healthz') return json({ ok: true, service: 'telegram-sales-bot' });
     if (request.method !== 'POST') return json({ error: 'not found' }, 404);
