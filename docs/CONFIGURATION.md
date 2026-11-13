@@ -2,7 +2,7 @@
 
 [← Docs](README.md) · [Deployment](DEPLOYMENT.md) · [Payments](PAYMENTS.md)
 
-Use **hosting secrets** for credentials. The examples `../.env.example` and `../.dev.vars.example` are templates, not values to commit with real data. Store admin passwords, Telegram tokens, Turso auth tokens, and SePay API keys outside Git.
+Use **hosting secrets** for credentials. For several bots in one running deployment, read [multi-bot setup](MULTI_BOT.md): use `MULTI_BOTS`, one HTTPS hostname per bot, prefixed secrets and isolated databases. The unprefixed names below remain the legacy **single-bot** configuration. The examples `../.env.example` and `../.dev.vars.example` are templates, not values to commit with real data. Store admin passwords, Telegram tokens, Turso auth tokens, and SePay API keys outside Git.
 
 ## Required and optional settings
 
@@ -24,6 +24,8 @@ Use **hosting secrets** for credentials. The examples `../.env.example` and `../
 | `STARS_ORDER_TTL_MINUTES` | Optional | Unapproved Stars-order TTL; default `1440` (24h) |
 | `PUBLIC_BASE_URL` | Local webhook registration script only | Public HTTPS origin, e.g. `https://YOUR_HOST.example` |
 | `WORKER_URL` | Legacy registration alias | Fallback when `PUBLIC_BASE_URL` is not set |
+| `MULTI_BOTS` | Multi-bot hosting only | Non-secret JSON array of `{id,host}` entries (1–20); see [multi-bot guide](MULTI_BOT.md) |
+| `BOT_ID` | Multi-bot webhook registration script only | ID of the one bot whose webhook is being registered |
 
 TTL values must be integers from **5 to 10080** minutes; unsupported values use defaults. **Approved Stars pre-checkouts never auto-expire**, regardless of TTL. On non-Cloudflare hosts, expiry requires the admin command or a trusted scheduler.
 
