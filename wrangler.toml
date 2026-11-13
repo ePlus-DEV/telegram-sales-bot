@@ -2,6 +2,8 @@ name = "eplus-telegram-sales-bot"
 main = "src/index.js"
 compatibility_date = "2026-11-01"
 
+# For MULTI_BOTS, replace/add individual bindings (e.g. SHOP_A_DB, SHOP_B_DB)
+# pointing to DISTINCT D1 databases. See docs/MULTI_BOT.md.
 [[d1_databases]]
 binding = "DB"
 database_name = "eplus-telegram-sales-bot"
