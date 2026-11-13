@@ -1,5 +1,6 @@
 // Offline configuration preflight: diagnostics contain variable NAMES, never values.
 import { pathToFileURL } from 'node:url';
+import { botRegistry, botEnvironment } from '../../src/multi-bot.js';
 
 const required = (env,name,errors) => {
   const value=typeof env[name]==='string'?env[name].trim():'';
