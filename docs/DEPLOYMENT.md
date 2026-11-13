@@ -1,6 +1,6 @@
 # Deployment — Cloudflare, Vercel, Railway, Render, Koyeb, Docker, Oracle, AWS, GCP and Azure
 
-[← Docs](README.md) · [Minimum requirements](MINIMUM_REQUIREMENTS.md) · [Getting started](GETTING_STARTED.md) · [Configuration](CONFIGURATION.md) · [Operations](OPERATIONS.md)
+[← Docs](README.md) · [Deploy buttons](DEPLOY_BUTTONS.md) · [Minimum requirements](MINIMUM_REQUIREMENTS.md) · [Getting started](GETTING_STARTED.md) · [Configuration](CONFIGURATION.md) · [Operations](OPERATIONS.md)
 
 > **Runtime support varies.** Cloudflare Workers use D1; existing Node, Vercel and Docker runtimes use **remote Turso/libSQL**. AWS EC2, Google Compute Engine and Azure VMs can **reuse generic Docker** but have no provider-specific IaC or CI/CD. Google Cloud Run and Azure Container Apps are **container candidates**, not verified integrations. See [requirements, free-tier conditions and support status](MINIMUM_REQUIREMENTS.md). No live provider payment E2E has been verified.
 
