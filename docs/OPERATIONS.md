@@ -19,10 +19,12 @@
 | --- | --- | --- |
 | **Cloudflare Workers** | `wrangler.toml` `[triggers]` every **5 minutes** | Verify scheduled job/logs and actual recovery on the deployed Worker |
 | **Oracle Docker Compose** | `scripts/run-maintenance.mjs` and a **host cron example** | Install/enable host cron, verify successful jobs and logs |
-| **Other Node/Docker VPS** | Same **on-demand** Node maintenance script | Supply a trusted supervisor/cron; do not expose an unauthenticated HTTP maintenance endpoint |
+| **Other single-bot Node/Docker VPS** | Same **on-demand** Node maintenance script | Supply a trusted supervisor/cron; do not expose an unauthenticated HTTP maintenance endpoint |
 | **Vercel/Railway/Render/Koyeb** | No automatic scheduler configured by this repository | Implement a trusted provider job/schedule, or operate admin recovery commands manually while testing |
 | **Google Cloud Run/Azure Container Apps** | Candidate container runtime only | Build and secure a separate scheduled Job; no completed recipe in repo |
 | **InstaBox Free** | On-demand test bot only; machine may suspend | Never depend on cron or prompt payment processing during suspension |
+
+**Multi-bot Node caveat:** `scripts/run-maintenance.mjs` rejects `MULTI_BOTS`; it cannot serve as a multi-tenant job. Implement/test tenant-aware scheduling first; see [Multi-bot](MULTI_BOT.md).
 
 On a **running Oracle Compose** host (working directory `deploy/oracle`), operator-run maintenance is:
 
