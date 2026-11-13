@@ -37,6 +37,22 @@ The current implementation is **not** a hosted store or a production guarantee. 
 
 **Recommendation for testing:** Cloudflare Workers + D1 avoids an always-running server and a second database provider. Free plans have quotas; cold starts or quota exhaustion on other platforms can delay payment callbacks. Deployment configurations exist, but **no provider is claimed to have passed a live end-to-end deployment test**.
 
+## Minimum deployment footprint — one bot
+
+For the existing [Oracle Always Free deployment](deploy/oracle/README.md), start with **one ARM64 VM, 1 OCPU, 2 GB RAM**, Ubuntu 24.04 LTS and a free-eligible boot volume (typically 50 GB). This is a **conservative starting recommendation, not a benchmarked minimum**. The bundled Compose configuration limits the Node bot to **512 MB** and Caddy to **192 MB**; the operating system, Docker, updates and image builds need additional memory.
+
+| Needed | Minimum setup for the current Docker source |
+| --- | --- |
+| Compute | 1 Oracle `VM.Standard.A1.Flex` (ARM64), 1 OCPU, 2 GB RAM **recommended** |
+| Storage | One free-eligible boot volume; Oracle documentation cites a 47 GB minimum and 50 GB as a common/default allocation |
+| Software | Ubuntu 24.04 ARM64, Docker Engine + Docker Compose plugin, Git |
+| Network | Public IPv4 + DNS A record; inbound TCP 80/443, SSH 22 restricted to administrator IP; outbound HTTPS |
+| Application | One Telegram BotFather token + webhook secret, numeric admin ID + strong dashboard password |
+| Data | One separate persistent Turso/libSQL database URL and auth token; migrations applied |
+| TLS and maintenance | Caddy HTTPS, OS cron for 5-minute notification/expiry retries; no public app port 3000 |
+
+**Not required for a single bot:** extra VPS, Redis, Kubernetes, a local database server or `MULTI_BOTS`. A 1 GB AMD E2.1.Micro may start the containers but is **not a dependable tested baseline** for Docker builds and payment callbacks. See the [minimum requirements, configuration checklist and first-run commands](deploy/oracle/README.md#minimum-requirements-for-one-bot).
+
 ## Quick start
 
 Requires **Node.js 22+ (24 preferred)** and a Telegram bot from [@BotFather](https://t.me/BotFather).
