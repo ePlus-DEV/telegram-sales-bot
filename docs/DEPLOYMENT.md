@@ -20,6 +20,7 @@
 | Google Cloud Run | Docker-based managed container | Turso | Candidate, no Cloud Run release/probes/cron or E2E yet |
 | Azure Virtual Machines | Existing Dockerfile + optional Caddy | Turso | Credits/12-month eligibility; manual host setup |
 | Azure Container Apps | Docker-based managed container | Turso | Candidate, no provider deployment manifest/scheduler/E2E yet |
+| InstaBox Free | Node/Docker inside a temporary cloud machine | Turso | 4 vCPU/8 GiB, but mandatory idle pause and max run; not production webhook hosting |
 
 Do not assume free plans guarantee 24/7 delivery. Telegram requires the bot to answer Stars pre-checkout queries quickly (official API: **10 seconds**). The [minimum requirements guide](MINIMUM_REQUIREMENTS.md) records specific sizing and free-tier constraints for **every** option in this table.
 
@@ -177,6 +178,20 @@ Provision one VM, attach a DNS name/public IP, allow 80/443 and restrict SSH in 
 **Status: candidate only**; this repo has a Docker image, **not** an Azure Container Apps deployment manifest, image pipeline, secrets/ingress template, or verified E2E. An experimental Consumption-plan starting choice is **0.25 vCPU / 0.5 GiB** (minimum allocation) or **0.5 vCPU / 1 GiB** for extra headroom, one replica maximum, min replicas 0, with external Turso and managed HTTPS. [Azure's free Consumption grant](https://learn.microsoft.com/en-us/azure/container-apps/billing) is usage-limited; monitoring, image registry/network and other services may bill.
 
 Use a trusted container registry, external HTTPS ingress forwarding to Node's application port, provider-managed secrets, a pre-migrated Turso database and a controlled initial test bot. Plan authenticated scheduled maintenance separately through Container Apps Jobs or another trusted scheduler. Do not deploy Caddy as an unnecessary second container inside managed ingress; test the entire payment matrix before accepting funds.
+
+## InstaBox — temporary test environment
+
+**Status: testing candidate, not production hosting.** InstaBox provisions an isolated Linux VM with Node.js/Docker and a [public HTTPS port](https://instabox.sh/docs/ports), so the Node bot can be run there temporarily with its **existing Turso database adapter**. It is **not** a supported perpetual 24/7 service on the Free plan: current [free-plan limits](https://instabox.sh/docs/limits) are **one machine**, **4 vCPU / 8 GiB RAM**, **20 GiB persistent disk by default**, **30-minute fixed idle pause**, and **480-minute maximum run**. The plan cannot disable auto-pause. Do not count on suspended sandboxes to answer Telegram webhooks, especially Stars pre-checkout queries with a 10-second deadline.
+
+For a **non-payment test bot only**:
+
+1. Install the official CLI and create a sandbox following the [InstaBox quick start](https://instabox.sh/docs/start): `instabox login`, then `instabox create --name sales-bot-test --template agent-browser`. Use **a separate test token and test Turso database**.
+2. SSH into the sandbox, clone this repository into the persistent `/data` home/workspace, and install dependencies. Use Node 24 and run `npm run check && npm test`; configure a private environment file outside Git. Never use live payment/customer secrets in a disposable sandbox.
+3. For short-lived testing, run the Node server on port 3000 in the machine (using `PORT=3000` and a **durable remote Turso** connection), then use `instabox port publish sales-bot-test 3000` from the CLI to obtain the public HTTPS URL. Test `/healthz` before doing anything else. The exact published URL is supplied by InstaBox and must not be guessed.
+4. **Only after explicit operator intent**, use `PUBLIC_BASE_URL` with the actual public HTTPS origin to register the **test Telegram bot** webhook. Note that a bot has only one active webhook; registering a disposable URL replaces its old destination.
+5. Stop the bot experiment before the sandbox pauses. Remove or redirect the test webhook to a stable host when the experiment ends. Background maintenance/cron on paused machines will not be reliable. For production use Cloudflare Workers + D1 or an always-on VM with verified operations and E2E payment tests.
+
+**No InstaBox API credentials, machine or live deployment are included in this repository.** The sandbox can compile/run the code; it does **not** demonstrate production readiness, uptime or safe payment processing.
 
 ## Register Telegram and SePay webhooks
 
