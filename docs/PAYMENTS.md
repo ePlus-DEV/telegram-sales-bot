@@ -1,6 +1,6 @@
 # Payments, settlement and safety
 
-[← Docs](README.md) · [Configuration](CONFIGURATION.md) · [Commands](COMMANDS.md) · [Operations](OPERATIONS.md)
+[← Documentation](README.md) · [Configuration](CONFIGURATION.md) · [Commands](COMMANDS.md) · [Operations](OPERATIONS.md) · [Databases](DATABASES.md)
 
 > **Payment-policy boundary:** Telegram requires **Stars (XTR)** for digital goods/services sold inside Telegram. This code uses **VietQR + SePay only for eligible physical goods**; adding payOS/MoMo/VNPay for other scenarios is planned, not implemented. Official references: [Telegram Stars](https://core.telegram.org/bots/payments-stars), [Bot API](https://core.telegram.org/bots/api).
 
@@ -58,7 +58,7 @@ Use `/refundreviews` and Telegram transaction records to reconcile. Refunds of f
 | Unknown Stars refund API result | `NEEDS_REVIEW`; no automated second refund call |
 | Unauthorized admin / bad CSRF | Operation rejected |
 
-The automated test suite covers portions of this matrix. **A full live-provider/staging evidence set is still required** before production.
+The automated test suite covers portions of this matrix. **A full live-provider/staging evidence set is still required** before production; the existence of provider Deploy badges does not change this.
 
 ## Related documentation
 
