@@ -13,6 +13,8 @@ services:
         sync: false
       - key: ADMIN_TELEGRAM_ID
         sync: false
+      - key: ADMIN_DASHBOARD_PASSWORD
+        sync: false
       - key: BANK_BIN
         sync: false
       - key: BANK_ACCOUNT_NO
@@ -26,4 +28,4 @@ services:
       - key: SUPPORT_USERNAME
         sync: false
 
-# Configure ADMIN_DASHBOARD_PASSWORD manually as a secret in Render dashboard.
+# The initial Deploy to Render wizard prompts for ADMIN_DASHBOARD_PASSWORD (sync: false).
