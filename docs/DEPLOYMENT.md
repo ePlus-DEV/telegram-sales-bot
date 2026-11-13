@@ -30,6 +30,8 @@ npm test
 npm run docs:check
 ```
 
+For multiple bots served by the **same** deployment, follow [multi-bot deployment](MULTI_BOT.md) to provision one HTTPS host, credentials and database per bot. The single-bot steps below otherwise remain valid.
+
 Create a separate **staging bot token/database**. Read [configuration](CONFIGURATION.md). Set `BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ADMIN_TELEGRAM_ID`, and `ADMIN_DASHBOARD_PASSWORD` in hosting secret/environment settings. If enabling eligible physical orders, set bank details and `SEPAY_WEBHOOK_API_KEY`.
 
 ## Cloudflare Workers + D1
@@ -131,7 +133,7 @@ npm run webhook:register
 
 PowerShell uses `$env:BOT_TOKEN="..."`, `$env:TELEGRAM_WEBHOOK_SECRET="..."` and `$env:PUBLIC_BASE_URL="..."`.
 
-This registers `https://YOUR_PUBLIC_DOMAIN/telegram/webhook`. **Do not include the path in `PUBLIC_BASE_URL`**. A Telegram token can point to only one active webhook destination; use different tokens for staging and production.
+This registers `https://YOUR_PUBLIC_DOMAIN/telegram/webhook`. In multi-bot mode, set `BOT_ID=shop_a` (and similarly for every bot) instead of global `BOT_TOKEN`; the script uses `MULTI_BOTS` and the selected bot's prefixed secrets and hostname. See [multi-bot setup](MULTI_BOT.md). **Do not include the path in `PUBLIC_BASE_URL`**. A Telegram token can point to only one active webhook destination; use different tokens for staging and production.
 
 For physical orders, set SePay's incoming-bank-transfer JSON webhook to `https://YOUR_PUBLIC_DOMAIN/sepay/webhook` using **API Key** authentication and the exact bank account configured in the app. Check [SePay's webhook documentation](https://docs.sepay.vn/tich-hop-webhooks.html) and transaction logs. A 200 response is not proof an order was matched.
 

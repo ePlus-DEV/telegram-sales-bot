@@ -19,6 +19,7 @@
 | Digital delivery | Preloaded key reservation, one-key fulfillment, customer key retrieval | Encrypted inventory, bulk key import |
 | Web Admin | Password login, server-side search/filters/pagination, product CRUD, bulk key intake, audit log, recorded-payment metrics, safe stock-count CSV | SSO/RBAC, physical stock/shipments, accounting-grade analytics |
 | Languages | Vietnamese / English for bot and admin; saved Telegram preference | Translated product fields, more locales |
+| Multi-bot hosting | Multiple bots on one app with per-host credentials, isolated D1/Turso databases and Web Admin | In-dashboard self-service bot provisioning |
 
 The current implementation is **not** a hosted store or a production guarantee. Product titles and descriptions are supplied by the shop owner and are not automatically translated.
 
@@ -54,6 +55,7 @@ Then choose a deployment, create the database, apply **all six migrations (0001�
 - [Bắt đầu sử dụng (Tiếng Việt)](docs/GETTING_STARTED.vi.md)
 - [Deployment instructions — all platforms](docs/DEPLOYMENT.md)
 - [Configuration & environment variables](docs/CONFIGURATION.md)
+- [Multiple independent bots on one deployment](docs/MULTI_BOT.md)
 
 ## Payments and security
 
@@ -71,6 +73,7 @@ Read [payment flows & limitations](docs/PAYMENTS.md), [security policy](SECURITY
 | [Getting started](docs/GETTING_STARTED.md) · [Tiếng Việt](docs/GETTING_STARTED.vi.md) | Set up a bot and first test order |
 | [Deployment](docs/DEPLOYMENT.md) | Cloudflare, Vercel, Railway, Render, Koyeb, Docker |
 | [Configuration](docs/CONFIGURATION.md) | Secrets, bank data, webhook URLs, migration checklist |
+| [Multi-bot](docs/MULTI_BOT.md) | Run independent bots via separate hostnames, secrets and databases |
 | [Payments](docs/PAYMENTS.md) | Stars vs VietQR/SePay, idempotency, expiry/refunds |
 | [Commands](docs/COMMANDS.md) | Buyer and admin bot commands |
 | [Web Admin guide](docs/ADMIN.md) | Search, filters, stock intake/export, audits, metrics and permissions |

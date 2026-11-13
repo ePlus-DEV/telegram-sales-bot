@@ -1,4 +1,6 @@
 # LOCAL DEVELOPMENT ONLY. Never commit .dev.vars.
+# Multi-bot: see docs/MULTI_BOT.md. Use MULTI_BOTS and prefixed SHOP_A_*
+# secrets, plus a distinct SHOP_A_DB Cloudflare D1 binding for each bot.
 BOT_TOKEN=123456789:replace_with_botfather_token
 TELEGRAM_WEBHOOK_SECRET=replace_with_random_alphanumeric_secret
 SEPAY_WEBHOOK_API_KEY=replace_with_sepay_secret

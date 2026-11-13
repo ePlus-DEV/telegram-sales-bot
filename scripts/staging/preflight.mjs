@@ -1,5 +1,6 @@
 // Offline configuration preflight: diagnostics contain variable NAMES, never values.
 import { pathToFileURL } from 'node:url';
+import { botRegistry, botEnvironment } from '../../src/multi-bot.js';
 
 const required = (env,name,errors) => {
   const value=typeof env[name]==='string'?env[name].trim():'';
@@ -9,6 +10,27 @@ const required = (env,name,errors) => {
 };
 
 export function checkConfiguration(env,{provider='cloudflare',physical=false}={}) {
+  if (env.MULTI_BOTS !== undefined && env.MULTI_BOTS !== '') {
+    let registry;
+    try { registry = botRegistry(env); }
+    catch { return {ok:false,provider,physical,errors:['MULTI_BOTS: invalid registry']}; }
+    const errors=[],tokens=new Set(),secrets=new Set(),databases=new Set(),urls=new Set();
+    for (const bot of registry) {
+      const scoped = botEnvironment(env,bot);
+      const check = checkConfiguration(scoped,{provider,physical});
+      errors.push(...check.errors.map(error=>bot.id+': '+error));
+      for (const [value,set,label] of [
+        [scoped.BOT_TOKEN,tokens,'BOT_TOKEN'],
+        [scoped.TELEGRAM_WEBHOOK_SECRET,secrets,'TELEGRAM_WEBHOOK_SECRET'],
+        [scoped.DB,databases,'DB'],
+        [scoped.TURSO_DATABASE_URL,urls,'TURSO_DATABASE_URL']
+      ]) {
+        if (value && set.has(value)) errors.push(bot.id+': duplicate '+label+' across bots');
+        if (value) set.add(value);
+      }
+    }
+    return {ok:errors.length===0,provider,physical,errors};
+  }
   const errors=[];
   if(!['cloudflare','turso'].includes(provider)) errors.push('provider: expected cloudflare or turso');
   const bot=required(env,'BOT_TOKEN',errors);
