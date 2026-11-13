@@ -65,10 +65,13 @@ export function allBotEnvironments(env) {
   const entries = botRegistry(env);
   if (entries === null) return [env];
   const environments = entries.map(bot => botEnvironment(env, bot));
-  const databases = new Set(), urls = new Set();
+  const databases = new Set(), urls = new Set(), tokens = new Set(), secrets = new Set();
   for (const scoped of environments) {
     if (!scoped.BOT_TOKEN || !scoped.TELEGRAM_WEBHOOK_SECRET)
       throw new Error('Missing per-bot Telegram credentials');
+    if (tokens.has(scoped.BOT_TOKEN) || secrets.has(scoped.TELEGRAM_WEBHOOK_SECRET))
+      throw new Error('Multi-bot Telegram credentials must be different');
+    tokens.add(scoped.BOT_TOKEN); secrets.add(scoped.TELEGRAM_WEBHOOK_SECRET);
     if (scoped.DB) {
       if (databases.has(scoped.DB)) throw new Error('Multi-bot D1 bindings must be different');
       databases.add(scoped.DB);
