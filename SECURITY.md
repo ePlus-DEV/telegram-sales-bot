@@ -1,11 +1,11 @@
 # Security Policy
 
-This is an early MVP, **not** a hardened payment system.
+This is an early MVP, **not** a hardened payment system. See [payment flows](docs/PAYMENTS.md), [operations](docs/OPERATIONS.md) and [database handling](docs/DATABASES.md).
 
 For a vulnerability, do **not** post tokens, customer keys, bank transactions, or exploit details in a public issue. Use GitHub private vulnerability reporting if enabled for this repository, or contact the maintainers through their existing organization support channels.
 
 ## Production checklist
-- Use unique random Telegram and SePay webhook secrets stored as Worker secrets, never in the repository.
+- Use unique random Telegram and SePay webhook secrets stored in the **hosting provider's secret store** (Cloudflare Worker secrets, PaaS settings or restricted VM files), never in the repository.
 - Keep D1 or Turso admin access and backups tightly restricted; never store payment data on an ephemeral host filesystem.
 - Validate real SePay webhook delivery with the precise bank account and transaction.
 - Test Stars invoice-link recovery, single pre-checkout approval, successful payment, refund, inventory and duplicate-event behavior.
@@ -20,7 +20,7 @@ Do not enable live transactions until a security and operations review is comple
 - Keep pending approvals reserved; never release keys based only on age after a Stars pre-checkout was approved.
 - Verify Stars refund outcomes in Telegram if the API times out; do not retry an unknown refund automatically.
 - Review unallocated/late bank transfers through `/bankreviews`; `/ackbank` records human review only.
-- Run migration 0004 before deploying, and verify the Cloudflare scheduled worker or an equivalent trusted maintenance process.
+- Apply **all migrations 0001–0006** to the correct database before enabling current code, and verify Cloudflare's scheduled Worker or an explicitly configured trusted Node maintenance process. The shipped Node runner is **single-bot only**.
 
 ## Admin Dashboard
 - Generate a unique 32+ character `ADMIN_DASHBOARD_PASSWORD` and store it in hosting secret settings. Never commit a default password.
