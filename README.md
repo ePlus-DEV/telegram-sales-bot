@@ -9,6 +9,17 @@
 
 > **Status: early MVP / chưa sẵn sàng production.** CI validates code and Docker builds; a complete live deployment and real-payment/refund end-to-end test have **not** been verified. Never enable customer payments solely on the strength of a green CI badge.
 
+## Deploy from GitHub
+
+Official provider **Deploy** buttons open a guided project-creation flow. **They do not create a production-ready shop in one click**: you must supply private Telegram/admin secrets, provision and migrate a durable database, verify HTTPS and manually register a **test** Telegram webhook. Review [button-by-button setup and limitations](docs/DEPLOY_BUTTONS.md) before deploying.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2FePlus-DEV%2Ftelegram-sales-bot)
+[![Deploy to Koyeb](https://www.koyeb.com/static/images/deploy/button.svg)](https://app.koyeb.com/deploy?type=git&builder=dockerfile&repository=github.com%2FePlus-DEV%2Ftelegram-sales-bot&branch=main&name=telegram-sales-bot&ports=3000%3Bhttp%3B%2F)
+
+**Cloudflare:** verify D1 creation/binding, apply migrations and add secrets. **Vercel/Render/Koyeb:** use an external Turso database; serverless/Free tiers can sleep or have execution limits. **Railway** requires a published project-specific Template ID before a real Railway Deploy badge can be linked. **Oracle/AWS/GCE/Azure VMs and InstaBox** use their [manual setup scripts/guides](docs/DEPLOYMENT.md); no verified one-click VM button exists in this repo. For Google Cloud Run, see the [experimental container setup](docs/DEPLOY_BUTTONS.md#google-cloud-run-experimental) rather than assuming a ready-made payment integration.
+
 ## Features at a glance
 
 | Area | Implemented | Not yet complete |
