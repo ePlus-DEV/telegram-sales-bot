@@ -123,6 +123,10 @@ Place a TLS reverse proxy in front of port 3000 and ensure the original Host/HTT
 
 ## Oracle Cloud Always Free — lightweight single bot
 
+**Minimum practical starting configuration:** 1 ARM64 `VM.Standard.A1.Flex`, 1 OCPU, **2 GB RAM**, free-eligible boot volume (about 50 GB), Ubuntu 24.04, Docker Engine + Compose plugin, one domain/public IPv4 (80/443), one BotFather token, one Turso database. This is a **recommendation**, not a measured load-based minimum. Full requirements and required `.env`/`app.env` fields are in the [Oracle minimum requirements](../deploy/oracle/README.md#minimum-requirements-for-one-bot).
+
+
+
 For a low-resource ARM64 Ubuntu VPS, use the included [Oracle Compose bundle](../deploy/oracle/README.md): one Node container (512 MB limit), one Caddy reverse proxy (192 MB limit), external Turso, HTTPS on 80/443 and restart on reboot. It deliberately starts **one bot only**; the general [multi-bot architecture](MULTI_BOT.md) stays available for later. The operator-run maintenance script can be invoked via Docker and scheduled with host cron; see [Oracle runbook](../deploy/oracle/README.md). Verify it before accepting real payments.
 
 ## Register Telegram and SePay webhooks
