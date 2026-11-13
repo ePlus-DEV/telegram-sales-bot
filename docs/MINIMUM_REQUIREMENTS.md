@@ -38,6 +38,7 @@
 | **Azure Virtual Machines** | Ubuntu Linux VM with **1 vCPU / 2 GB RAM recommended**; B1s 1 GB is test-only | External Turso + Caddy, public HTTPS | VM free offers are **time-limited and account/region dependent**; disks, static IP and egress may be chargeable | **Reuse Docker**, no Azure VM-specific IaC/CI/CD |
 | **Azure Container Apps (Consumption)** | Start **0.25 vCPU / 0.5 GiB** (platform minimum) or **0.5 vCPU / 1 GiB** for extra headroom; set min replicas 0 | External Turso, managed HTTPS; ingress target port = app port | Consumption includes monthly free grant of **180K vCPU-seconds, 360K GiB-seconds, 2M HTTP requests**, not free unlimited uptime | **Candidate** via Dockerfile; requires ingress/secrets/scheduler configuration and validation |
 | **AWS Lambda + API Gateway/Function URL** | Function memory adjustable; **not comparable to a VPS** | External Turso; separately managed HTTPS event adapter | Lambda free usage does **not** imply API Gateway/network/logs free | **Not directly supported**: current `api/` handlers are Vercel-specific, not AWS Lambda event adapters |
+| **InstaBox Free (cloud sandbox)** | **4 vCPU / 8 GiB**, **20 GiB** persistent disk by default; one machine | External Turso; `instabox port publish` provides a public HTTPS endpoint | **Pauses after 30 min idle** and has a **480-minute maximum run**; Free cannot disable auto-pause. Bad choice for permanent Telegram/Stars webhooks | **Candidate for testing only**; existing Node/Docker source may run, but no end-to-end InstaBox validation |
 
 **For a single low-traffic bot:** prioritize **Cloudflare Workers + D1** for the smallest operational footprint; **Oracle A1 1 OCPU / 2 GB** for a self-managed VPS; or a managed runtime such as **Cloud Run** for bursty webhooks **only after** implementing/verifying maintenance scheduling, secrets and the Stars pre-checkout latency. Do not choose a sleeping free service for payment-critical webhook acceptance.
 
@@ -78,6 +79,7 @@ For managed containers (Cloud Run / Azure Container Apps), use provider-managed 
 | AWS | [Free Tier account plans](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier-plans.html) · [EC2 eligibility](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-free-tier-usage.html) |
 | Google Cloud | [GCP Free Program](https://docs.cloud.google.com/free/docs/free-cloud-features) · [Cloud Run pricing](https://cloud.google.com/run/pricing) |
 | Azure | [Free account benefits](https://learn.microsoft.com/en-us/training/modules/create-an-azure-account) · [Container Apps billing](https://learn.microsoft.com/en-us/azure/container-apps/billing) · [Container resource allocation](https://learn.microsoft.com/en-us/azure/container-apps/containers) |
+| InstaBox | [Current plan limits](https://instabox.sh/docs/limits) · [Idle pause and max-run](https://instabox.sh/docs/idle-suspend) · [Public HTTPS ports](https://instabox.sh/docs/ports) |
 
 ## Minimum pre-launch validation on **every** provider
 
