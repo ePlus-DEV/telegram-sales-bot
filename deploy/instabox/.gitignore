@@ -1,0 +1,5 @@
+# Never commit tokens / auth / inventory.
+app.env
+.env
+*.pem
+*.key

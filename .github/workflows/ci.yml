@@ -25,6 +25,13 @@ jobs:
           cp .env.example .env
           cp app.env.example app.env
           docker compose config --quiet
+      - name: Validate InstaBox setup and Compose (offline)
+        run: |
+          bash -n deploy/instabox/setup.sh deploy/instabox/run.sh
+          cd deploy/instabox
+          cp app.env.example app.env
+          docker compose config --quiet
+          rm app.env
       - name: Documentation links
         run: npm run docs:check
       - name: Validate migration schema (disposable SQLite)
