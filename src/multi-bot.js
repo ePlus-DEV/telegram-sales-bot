@@ -54,9 +54,11 @@ export function botEnvironment(env, bot) {
 export function selectBotEnvironment(env, hostname) {
   const entries = botRegistry(env);
   if (entries === null) return env; // Existing single-bot deployments unchanged.
-  const bot = entries.find(item => item.host === String(hostname).toLowerCase());
-  if (!bot) return null;
-  return botEnvironment(env, bot);
+  const index = entries.findIndex(item => item.host === String(hostname).toLowerCase());
+  if (index === -1) return null;
+  // Validate every configured tenant, including distinct storage, before
+  // processing any request. Misconfiguration must fail closed.
+  return allBotEnvironments(env)[index];
 }
 
 export function allBotEnvironments(env) {
