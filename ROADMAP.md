@@ -21,7 +21,7 @@
 | Payment reliability | Partial | Replays, callback idempotency, expiry before pre-checkout, uncertain-refund review; at-least-once notification delivery |
 | Web Admin | Partial | Product CRUD, single/bulk key intake, search/filter/page, safe aggregate stock export, audit and recorded-payment statistics; no physical stock or SSO/RBAC |
 | Two languages | Implemented | Bot and admin `vi/en`, Telegram language preference; product copy not localized |
-| Multi-platform deployment | Partial | Code/config for Workers, Vercel, Railway, Render, Koyeb and Docker; live deploy matrix unverified |
+| Multi-platform deployment | Partial | Worker/D1, Vercel and generic Docker code; Oracle/InstaBox examples and deploy badges; AWS/GCP/Azure mostly Docker reuse/candidates; live provider matrix unverified |
 
 ## Current implementation order — feature completion first
 
@@ -77,5 +77,7 @@ The current development priority is **feature completeness before live staging d
 ## Maintaining this roadmap
 
 When opening a PR: link the relevant issue/roadmap item, include test evidence and any required migrations or deployment actions. Update the state only after code is merged and verified. **Do not automatically close issue #5 or #6** until their unimplemented acceptance criteria are met; partial implementation is not completion.
+
+Keep deployment support claims aligned with [architecture](docs/ARCHITECTURE.md), [databases](docs/DATABASES.md), [provider maturity](docs/DEPLOYMENT.md) and [staging validation](docs/STAGING_VALIDATION.md). Documentation updates do not complete a payment release gate.
 
 Use [GitHub Issues](https://github.com/ePlus-DEV/telegram-sales-bot/issues) for detailed scope and [PRs](https://github.com/ePlus-DEV/telegram-sales-bot/pulls) for implementation review. Revisit priorities after each staging test cycle.
