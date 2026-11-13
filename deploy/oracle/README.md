@@ -1,6 +1,6 @@
 # Oracle Cloud Always Free — single-bot lightweight deployment
 
-[← Deployment](../../docs/DEPLOYMENT.md) · [Configuration](../../docs/CONFIGURATION.md) · [Payments](../../docs/PAYMENTS.md) · [Operations](../../docs/OPERATIONS.md)
+[← Documentation](../../docs/README.md) · [Deployment](../../docs/DEPLOYMENT.md) · [Configuration](../../docs/CONFIGURATION.md) · [Databases](../../docs/DATABASES.md) · [Operations](../../docs/OPERATIONS.md)
 
 This optional, **single-bot** template runs one Node.js 24 application and a Caddy HTTPS reverse proxy on an Oracle Cloud Ubuntu ARM64 VPS. The bot uses a **persistent external Turso/libSQL database** to avoid running a database daemon and to retain order/inventory data if the VPS is rebuilt. No Redis, Kubernetes, or paid service is mandatory. The existing multi-bot feature remains available separately via [multi-bot docs](../../docs/MULTI_BOT.md).
 
@@ -8,7 +8,7 @@ This optional, **single-bot** template runs one Node.js 24 application and a Cad
 
 ## Minimum requirements for one bot
 
-The table distinguishes the **code/runtime requirements** from a conservative Oracle VM sizing recommendation. Actual throughput, peak RSS, cold starts, and real-payment callback latency have **not been benchmarked** on Oracle.
+The table below is **the Oracle-specific resource reference**; other platforms are compared in [Minimum requirements](../../docs/MINIMUM_REQUIREMENTS.md). The numbers are conservative **recommendations**, not measured hardware minima.  Actual throughput, peak RSS, cold starts, and real-payment callback latency have **not been benchmarked** on Oracle.
 
 | Item | Required to run this source | Recommended initial Oracle Always Free choice |
 | --- | --- | --- |
@@ -37,39 +37,14 @@ For the **single-bot** Oracle bundle, only these settings are required to start 
 
 Optional: `SEPAY_WEBHOOK_API_KEY`, `BANK_BIN`, `BANK_ACCOUNT_NO`, `BANK_ACCOUNT_NAME` are needed **together only for eligible physical sales using SePay/VietQR**. `SUPPORT_USERNAME` is optional. **No `MULTI_BOTS`, `SHOP_A_*` variables or extra VPS are needed for one bot.** No secrets belong in `.env.example`, `app.env.example`, GitHub or build logs.
 
-### Minimum first-run checklist
+### Installation sequence
 
-1. Confirm **1 free-eligible VM** (ARM64, 1 OCPU, 2 GB), public IPv4, DNS A record and OCI ingress 80/443. Restrict SSH to your IP; make sure your instance can reach Telegram and Turso over HTTPS.
-2. Install Docker Engine + Compose plugin and Git on Ubuntu; enable Docker. Clone this repo.
-3. Copy `deploy/oracle/.env.example` to `.env`, and `app.env.example` to `app.env`; configure only the fields in the table and protect both files with `chmod 600`.
-4. From `deploy/oracle`, run the offline Compose configuration check and **Turso preflight** (checks names/formats; never prints secret values):
+**Create VM → install Docker → configure private secrets → validate schema/database → start app → verify HTTPS → manually register the test Telegram webhook → enable host cron.** Follow the detailed numbered sections below. Do not run real-payment callbacks until [staging validation](../../docs/STAGING_VALIDATION.md) and [payment release gates](../../ROADMAP.md#p0--release-blockers-deferred-execution-required-for-launch) pass.
 
-   ```bash
-   docker compose config --quiet
-   docker compose build
-   docker compose run --rm --no-deps bot npm run staging:preflight -- --provider=turso
-   ```
+## Oracle-specific Free Tier constraints
 
-5. Back up or start with an **empty test Turso database**, then apply migrations once, start the containers and check HTTPS:
-
-   ```bash
-   docker compose run --rm --no-deps bot npm run db:migrate:turso
-   docker compose up -d
-   docker compose ps
-   curl --fail --show-error https://YOUR_DOMAIN/healthz
-   ```
-
-6. After HTTPS is healthy, intentionally register your **test bot** webhook and check `/start`, `/catalog` and admin login. Configure host cron as shown below; do not accept real payments until reconciliation and controlled provider payment E2E are verified.
-
-**Automatic deployment:** This bundle **does not** include unattended CI/CD to Oracle. The current GitHub CI validates code, Compose and Docker builds, but first VM setup, secrets, TLS/DNS and actual deployment are operator-managed. Do not interpret green CI or `/healthz` as proof of real-payment readiness.
-
-## Suggested size and limits
-
-- **VM.Standard.A1.Flex**, **1 OCPU**, **2 GB RAM**, Ubuntu 24.04 ARM64, minimum eligible boot volume (currently **47 GB**).
-- Two containers: Node bot limited to 512 MB and Caddy to 192 MB. Leave the remainder for Ubuntu, Docker, page cache and short spikes. These are initial budgets, not measured peak guarantees.
-- Alternative if A1 has no capacity: **VM.Standard.E2.1.Micro**, 1 GB RAM, 1/8 OCPU baseline. It is significantly tighter for Docker and payment webhook latency; avoid it for live payment use without testing.
-- Oracle's Always Free compute/storage limits are per tenancy, not per VM. Check actual limits, remaining storage, tenancy status and free-eligible labels in your home region: <https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm>.
-- Idle Always Free instances may be reclaimed; keep backups and monitor important payments. Do not generate artificial traffic to evade idle policies.
+- Check the **Always Free** label, tenancy quotas, **ARM capacity in your home region**, disk allocation and [Oracle's official limits](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm) before creating the VM. Regional availability and instance reclamation can affect uptime.
+- An AMD E2.1.Micro with 1 GB RAM may be useful for experiments but is **not** a tested payment deployment baseline for Docker + Caddy + the bot. Keep backups; do not artificially generate traffic to evade free-tier policies.
 
 ## 1. Prepare one Oracle instance
 
@@ -108,6 +83,8 @@ The image includes the schema and registration scripts for operator-run one-off 
 
 ```bash
 docker compose build
+docker compose run --rm --no-deps bot npm run staging:preflight -- --provider=turso
+# Migrations write to Turso: verify this is a NEW TEST database and backup first.
 docker compose run --rm --no-deps bot npm run db:migrate:turso
 docker compose up -d
 docker compose ps
@@ -168,4 +145,4 @@ Back up and restore the **external Turso database** according to Turso's procedu
 
 ## Optional future upgrade
 
-When you actually need more bots, the existing [multi-bot hosting mode](../../docs/MULTI_BOT.md) can route distinct HTTPS hostnames to isolated databases. Do not provision several bot databases or pay for larger Oracle shapes just to run one bot today.
+When you need more bots, [multi-bot hosting](../../docs/MULTI_BOT.md) supports separate hostnames, secrets and databases. **Do not reuse the included `scripts/run-maintenance.mjs` for multi-bot:** it deliberately rejects `MULTI_BOTS`. A tenant-aware trusted Node scheduler must be implemented and tested before unattended multi-bot use. Do not provision more databases or a larger VM just to run one bot today.
