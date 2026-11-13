@@ -34,24 +34,31 @@ The current implementation is **not** a hosted store or a production guarantee. 
 | **Koyeb** | Node.js / Docker | **Turso** | [Koyeb setup](docs/DEPLOYMENT.md#koyeb--turso) |
 | **Docker / VPS / EasyPanel** | Node.js / Docker | **Turso** | [Docker setup](docs/DEPLOYMENT.md#docker--vps--easypanel) |
 | **Oracle Always Free (1 bot)** | ARM64 Docker Compose + Caddy | **Turso** | [Lightweight Oracle deployment](deploy/oracle/README.md) |
+| **AWS EC2 (VM)** | Ubuntu x86_64/ARM64 + Docker | **Turso** | [Manual VM deployment; not AWS-specific IaC](docs/DEPLOYMENT.md#aws-ec2--docker-vm) |
+| **Google Compute Engine (VM)** | Ubuntu + Docker | **Turso** | [Manual VM deployment](docs/DEPLOYMENT.md#google-compute-engine--docker-vm) |
+| **Google Cloud Run** | Managed Node container | **Turso** | [Container candidate; not E2E tested](docs/DEPLOYMENT.md#google-cloud-run--managed-container-candidate) |
+| **Azure VM** | Ubuntu + Docker | **Turso** | [Manual VM deployment](docs/DEPLOYMENT.md#azure-virtual-machines--docker-vm) |
+| **Azure Container Apps** | Managed container | **Turso** | [Container candidate; not E2E tested](docs/DEPLOYMENT.md#azure-container-apps--managed-container-candidate) |
 
 **Recommendation for testing:** Cloudflare Workers + D1 avoids an always-running server and a second database provider. Free plans have quotas; cold starts or quota exhaustion on other platforms can delay payment callbacks. Deployment configurations exist, but **no provider is claimed to have passed a live end-to-end deployment test**.
 
 ## Minimum deployment footprint — one bot
 
-For the existing [Oracle Always Free deployment](deploy/oracle/README.md), start with **one ARM64 VM, 1 OCPU, 2 GB RAM**, Ubuntu 24.04 LTS and a free-eligible boot volume (typically 50 GB). This is a **conservative starting recommendation, not a benchmarked minimum**. The bundled Compose configuration limits the Node bot to **512 MB** and Caddy to **192 MB**; the operating system, Docker, updates and image builds need additional memory.
+**For every provider**, see the [full minimum-resource and free-tier comparison](docs/MINIMUM_REQUIREMENTS.md) covering Cloudflare, Vercel, Railway, Render, Koyeb, Oracle, AWS EC2, Google Compute Engine, Cloud Run, Azure VM and Azure Container Apps.
+
+For **one small bot**, start from **1 vCPU / 2 GB RAM on a Docker VPS** or use **Cloudflare Workers + D1 without a VPS**. These are initial recommendations, **not measured hardware minimums**. A 512 MB serverless/managed service may run under light load, but cold starts and payment timeouts still need end-to-end verification. The Oracle Compose bundle separately limits the Node bot to **512 MB** and Caddy to **192 MB**, excluding OS/Docker overhead.
 
 | Needed | Minimum setup for the current Docker source |
 | --- | --- |
-| Compute | 1 Oracle `VM.Standard.A1.Flex` (ARM64), 1 OCPU, 2 GB RAM **recommended** |
-| Storage | One free-eligible boot volume; Oracle documentation cites a 47 GB minimum and 50 GB as a common/default allocation |
-| Software | Ubuntu 24.04 ARM64, Docker Engine + Docker Compose plugin, Git |
+| Compute | For VMs: **1 vCPU / 2 GB RAM recommended**; Oracle A1.Flex is one example; AWS/GCP/Azure VM variants may cost money |
+| Storage | VM boot disk (~20 GB+ generic guideline, or the platform-specific free-eligible minimum); persistent data is stored in remote Turso |
+| Software | Linux + Docker Engine/Compose + Git, or supported managed Functions/Workers runtime |
 | Network | Public IPv4 + DNS A record; inbound TCP 80/443, SSH 22 restricted to administrator IP; outbound HTTPS |
 | Application | One Telegram BotFather token + webhook secret, numeric admin ID + strong dashboard password |
 | Data | One separate persistent Turso/libSQL database URL and auth token; migrations applied |
 | TLS and maintenance | Caddy HTTPS, OS cron for 5-minute notification/expiry retries; no public app port 3000 |
 
-**Not required for a single bot:** extra VPS, Redis, Kubernetes, a local database server or `MULTI_BOTS`. A 1 GB AMD E2.1.Micro may start the containers but is **not a dependable tested baseline** for Docker builds and payment callbacks. See the [minimum requirements, configuration checklist and first-run commands](deploy/oracle/README.md#minimum-requirements-for-one-bot).
+**Not required for a single bot:** extra VPS, Redis, Kubernetes, a local database service or `MULTI_BOTS`. **AWS EC2 Free Tier is not perpetual**, and Google Compute Engine Always Free `e2-micro` has US region restrictions; do not assume any VM or managed free tier guarantees zero charges. See [all-provider comparison](docs/MINIMUM_REQUIREMENTS.md) and the [Oracle first-run checklist](deploy/oracle/README.md#minimum-requirements-for-one-bot).
 
 ## Quick start
 
@@ -71,6 +78,7 @@ Then choose a deployment, create the database, apply **all six migrations (0001�
 - [Getting started (English)](docs/GETTING_STARTED.md)
 - [Bắt đầu sử dụng (Tiếng Việt)](docs/GETTING_STARTED.vi.md)
 - [Deployment instructions — all platforms](docs/DEPLOYMENT.md)
+- [Minimum configuration & free-tier limits by provider](docs/MINIMUM_REQUIREMENTS.md)
 - [Configuration & environment variables](docs/CONFIGURATION.md)
 - [Multiple independent bots on one deployment](docs/MULTI_BOT.md)
 
@@ -88,8 +96,9 @@ Read [payment flows & limitations](docs/PAYMENTS.md), [security policy](SECURITY
 | --- | --- |
 | [Documentation index](docs/README.md) | Find guides by role/task |
 | [Getting started](docs/GETTING_STARTED.md) · [Tiếng Việt](docs/GETTING_STARTED.vi.md) | Set up a bot and first test order |
-| [Deployment](docs/DEPLOYMENT.md) | Cloudflare, Vercel, Railway, Render, Koyeb, Docker |
+| [Deployment](docs/DEPLOYMENT.md) | Cloudflare, Vercel, Railway, Render, Koyeb, Oracle, AWS, GCP, Azure (deployment maturity varies) |
 | [Configuration](docs/CONFIGURATION.md) | Secrets, bank data, webhook URLs, migration checklist |
+| [Minimum requirements](docs/MINIMUM_REQUIREMENTS.md) | One-bot sizing, cloud free-tier conditions and support status per provider |
 | [Multi-bot](docs/MULTI_BOT.md) | Run independent bots via separate hostnames, secrets and databases |
 | [Payments](docs/PAYMENTS.md) | Stars vs VietQR/SePay, idempotency, expiry/refunds |
 | [Commands](docs/COMMANDS.md) | Buyer and admin bot commands |
