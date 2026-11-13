@@ -33,6 +33,7 @@ The current implementation is **not** a hosted store or a production guarantee. 
 | **Render** | Node.js / Docker | **Turso** | [Render setup](docs/DEPLOYMENT.md#render--turso) |
 | **Koyeb** | Node.js / Docker | **Turso** | [Koyeb setup](docs/DEPLOYMENT.md#koyeb--turso) |
 | **Docker / VPS / EasyPanel** | Node.js / Docker | **Turso** | [Docker setup](docs/DEPLOYMENT.md#docker--vps--easypanel) |
+| **Oracle Always Free (1 bot)** | ARM64 Docker Compose + Caddy | **Turso** | [Lightweight Oracle deployment](deploy/oracle/README.md) |
 
 **Recommendation for testing:** Cloudflare Workers + D1 avoids an always-running server and a second database provider. Free plans have quotas; cold starts or quota exhaustion on other platforms can delay payment callbacks. Deployment configurations exist, but **no provider is claimed to have passed a live end-to-end deployment test**.
 

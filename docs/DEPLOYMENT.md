@@ -14,6 +14,7 @@
 | Render | Docker/Node HTTP | Turso | Free service can sleep, affecting webhook timing |
 | Koyeb | Docker/Node HTTP | Turso | Validate current free-tier limits, sleep and port settings |
 | Docker/VPS/EasyPanel | Node HTTP in container | Turso | Owner must handle HTTPS, availability and system updates |
+| Oracle Always Free (1 bot) | ARM64 Docker Compose + Caddy | Turso | 1 OCPU / 2 GB baseline; separate Oracle setup, no live payment E2E |
 
 Do not assume free plans guarantee 24/7 delivery. Telegram requires the bot to answer Stars pre-checkout queries quickly (official API: **10 seconds**).
 
@@ -119,6 +120,10 @@ docker run --rm -p 3000:3000 --env-file .env --name telegram-sales-bot telegram-
 ```
 
 Place a TLS reverse proxy in front of port 3000 and ensure the original Host/HTTPS origin is preserved for Web Admin login CSRF protections. Arrange supervised restarts, log retention, security updates and an operator-managed scheduling process. Do **not** expose raw Docker port 3000 as a payment endpoint without HTTPS.
+
+## Oracle Cloud Always Free — lightweight single bot
+
+For a low-resource ARM64 Ubuntu VPS, use the included [Oracle Compose bundle](../deploy/oracle/README.md): one Node container (512 MB limit), one Caddy reverse proxy (192 MB limit), external Turso, HTTPS on 80/443 and restart on reboot. It deliberately starts **one bot only**; the general [multi-bot architecture](MULTI_BOT.md) stays available for later. The operator-run maintenance script can be invoked via Docker and scheduled with host cron; see [Oracle runbook](../deploy/oracle/README.md). Verify it before accepting real payments.
 
 ## Register Telegram and SePay webhooks
 

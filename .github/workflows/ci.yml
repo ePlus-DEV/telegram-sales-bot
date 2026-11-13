@@ -19,6 +19,12 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Static check
         run: npm run check
+      - name: Validate Oracle Compose example (offline)
+        run: |
+          cd deploy/oracle
+          cp .env.example .env
+          cp app.env.example app.env
+          docker compose config --quiet
       - name: Documentation links
         run: npm run docs:check
       - name: Validate migration schema (disposable SQLite)

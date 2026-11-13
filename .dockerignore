@@ -10,3 +10,6 @@ node_modules
 coverage
 tests
 docs
+
+# Deployment secrets must not enter a Docker build context.
+deploy
