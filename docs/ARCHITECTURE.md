@@ -46,7 +46,7 @@ Private values are stored in provider secret settings or git-ignored host files,
 - **Digital:** Telegram Stars checkout and `successful_payment` event; never fulfill on pre-checkout alone. Approved checkouts must not be expired automatically.
 - **Physical:** VietQR transfer instructions and authenticated SePay webhook; amount/account/memo/event must match before settlement.
 - **Outbox:** DB-backed notification retries are **at least once**; a Telegram message can be repeated if acknowledgement is lost.
-- **Periodic work:** Cloudflare Worker has its own scheduled handler; `scripts/run-maintenance.mjs` reuses it when invoked **explicitly** on Node. The Oracle guide supplies an example host cron. Node PaaS and InstaBox do **not** automatically gain a working scheduler from the Dockerfile.
+- **Periodic work:** Cloudflare Worker has its own scheduled handler; `scripts/run-maintenance.mjs` reuses it when invoked **explicitly for a single bot** on Node and rejects `MULTI_BOTS`. A tenant-aware Node scheduler is **not** shipped. The Oracle guide supplies an example host cron. Node PaaS and InstaBox do **not** automatically gain a working scheduler from the Dockerfile.
 - **No production deploy in CI:** GitHub Actions performs offline checks, a Docker build and manually scoped staging validation. It does not provision clouds, migrate live DBs, register webhooks or certify payment settlement.
 
 ## Code map
